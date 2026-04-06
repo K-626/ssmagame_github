@@ -26,10 +26,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build Pygbag
-        uses: pmp-p/pygbag-action@v0.8.6
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          app_folder: game
+          python-version: '3.11'
+
+      - name: Install pygbag
+        run: |
+          python -m pip install --upgrade pip
+          pip install pygbag
+
+      - name: Build Pygbag
+        run: |
+          # Build the game directory
+          python -m pygbag --build game/
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -37,7 +47,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './build/web'
+          path: './game/build/web'
 
       - name: Deploy to GitHub Pages
         id: deployment
