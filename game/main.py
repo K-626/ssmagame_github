@@ -8,9 +8,7 @@ height=600
 
 ground=540
 
-pygame.init()
-screen = pygame.display.set_mode((width, height), pygame.SCALED)
-clock = pygame.time.Clock()
+# pygame.init() and screen setup moved inside main() for better stability in web environment
 
 # --- ゲーム状態の定義 ---
 STATE_PLAYING = "playing"
@@ -2813,6 +2811,26 @@ def start_next_wave():
 async def main():
     global game_state, settings_selecting, player, wave_number, enemies, enemy_bullets
     global is_combat_mode, wave_start_wait_timer, wave_clear_timer, hit_stop_timer
+    global screen
+
+    pygame.init()
+    screen = pygame.display.set_mode((width, height), pygame.SCALED)
+    clock = pygame.time.Clock()
+
+    # Pre-define fonts to avoid creating them every frame (major performance bottleneck)
+    font_main = pygame.font.SysFont(None, 48)
+    font_title = pygame.font.SysFont(None, 60)
+    font_settings_hint = pygame.font.SysFont(None, 36)
+    font_settings_title = pygame.font.SysFont(None, 50)
+    font_settings_row = pygame.font.SysFont(None, 32)
+    font_settings_footer = pygame.font.SysFont(None, 28)
+    font_card_name = pygame.font.SysFont(None, 30)
+    font_card_skill = pygame.font.SysFont(None, 18)
+    font_weapon_name = pygame.font.SysFont(None, 40)
+    font_weapon_desc = pygame.font.SysFont(None, 24)
+    font_upgrade_name = pygame.font.SysFont(None, 34)
+    font_upgrade_desc = pygame.font.SysFont(None, 24)
+    font_gameover = pygame.font.SysFont(None, 100)
 
     running = True
     is_fullscreen = False
@@ -3033,19 +3051,18 @@ async def main():
             pygame.draw.rect(screen, (180, 200, 220), (PLATFORM_X, PLATFORM_Y, PLATFORM_W, 4))
     
         # UIの描画
-        font = pygame.font.SysFont(None, 48)
         if game_state != STATE_SELECT_CHAR:
-            hp_text = font.render(f"PLAYER HP: {player.hp} / {player.max_hp}", True, (0, 0, 0))
+            hp_text = font_main.render(f"PLAYER HP: {player.hp} / {player.max_hp}", True, (0, 0, 0))
             screen.blit(hp_text, (width - 320, 20))
             if is_combat_mode:
-                wave_text = font.render(f"WAVE: {wave_number}", True, (0, 0, 0))
+                wave_text = font_main.render(f"WAVE: {wave_number}", True, (0, 0, 0))
                 screen.blit(wave_text, (width - 320, 70))
                 if wave_clear_timer > 0:
-                    clear_text = font.render(f"WAVE {wave_number} CLEARED!", True, (0, 150, 0))
+                    clear_text = font_main.render(f"WAVE {wave_number} CLEARED!", True, (0, 150, 0))
                     screen.blit(clear_text, (width // 2 - 150, height // 2 - 100))
             
                 if wave_start_wait_timer > 0:
-                    ready_msg = font.render("READY?", True, (255, 0, 0))
+                    ready_msg = font_main.render("READY?", True, (255, 0, 0))
                     screen.blit(ready_msg, (width // 2 - 70, height // 2))
 
         player.draw(screen)
@@ -3056,11 +3073,9 @@ async def main():
 
         # ロビーとセレクト画面のオーバーレイ
         if game_state == STATE_LOBBY:
-            title_font = pygame.font.SysFont(None, 60)
-            prompt_text = title_font.render("Press [ENTER] to open Character Select", True, (255, 255, 200))
+            prompt_text = font_title.render("Press [ENTER] to open Character Select", True, (255, 255, 200))
             screen.blit(prompt_text, (width//2 - prompt_text.get_width()//2, 55))
-            settings_hint = pygame.font.SysFont(None, 36)
-            hint_text = settings_hint.render("Press [S] for Key Settings", True, (180, 200, 255))
+            hint_text = font_settings_hint.render("Press [S] for Key Settings", True, (180, 200, 255))
             screen.blit(hint_text, (width//2 - hint_text.get_width()//2, 100))
         
         elif game_state == STATE_SETTINGS:
@@ -3068,11 +3083,9 @@ async def main():
             overlay.fill((0, 0, 0, 220))
             screen.blit(overlay, (0, 0))
         
-            title_font_s = pygame.font.SysFont(None, 50)
-            title_s = title_font_s.render("Key Settings", True, (255, 255, 255))
+            title_s = font_settings_title.render("Key Settings", True, (255, 255, 255))
             screen.blit(title_s, (width // 2 - title_s.get_width() // 2, 50))
         
-            row_font = pygame.font.SysFont(None, 32)
             mx, my = pygame.mouse.get_pos()
             for idx, (action, keycode) in enumerate(key_config.items()):
                 y = 130 + idx * 45
@@ -3089,18 +3102,17 @@ async def main():
                 pygame.draw.rect(screen, bg_color, (350, y, 500, 38), border_radius=5)
                 pygame.draw.rect(screen, (100, 100, 120), (350, y, 500, 38), 1, border_radius=5)
             
-                label = row_font.render(name, True, (255, 255, 255))
+                label = font_settings_row.render(name, True, (255, 255, 255))
                 screen.blit(label, (370, y + 8))
             
                 if is_selected:
-                    key_text = row_font.render("Press a key...", True, (255, 255, 0))
+                    key_text = font_settings_row.render("Press a key...", True, (255, 255, 0))
                 else:
                     key_name = pygame.key.name(keycode).upper()
-                    key_text = row_font.render(f"[{key_name}]", True, (200, 200, 200))
+                    key_text = font_settings_row.render(f"[{key_name}]", True, (200, 200, 200))
                 screen.blit(key_text, (650, y + 8))
         
-            hint_font = pygame.font.SysFont(None, 28)
-            hint = hint_font.render("Click to select, press key to rebind. ESC to return.", True, (160, 160, 180))
+            hint = font_settings_footer.render("Click to select, press key to rebind. ESC to return.", True, (160, 160, 180))
             screen.blit(hint, (width // 2 - hint.get_width() // 2, height - 50))
 
         elif game_state == STATE_SELECT_CHAR:
@@ -3141,20 +3153,17 @@ async def main():
                 pygame.draw.rect(screen, card["color"], draw_rect, border_radius=10)
                 pygame.draw.rect(screen, (255, 255, 255), draw_rect, 2, border_radius=10)
             
-                name_font = pygame.font.SysFont(None, 30)
-                name_text = name_font.render(card["name"], True, (255, 255, 255))
+                name_text = font_card_name.render(card["name"], True, (255, 255, 255))
                 screen.blit(name_text, (cx + 10, cy + (10 if is_hovered else 20)))
                 # スキル名の表示
-                skill_font = pygame.font.SysFont(None, 18)
                 for si, skill_line in enumerate(card["skills"].split("\n")):
-                    st = skill_font.render(skill_line, True, (220, 220, 220))
+                    st = font_card_skill.render(skill_line, True, (220, 220, 220))
                     screen.blit(st, (cx + 10, cy + (45 if is_hovered else 55) + si * 18))
 
-        elif game_state == STATE_PAUSED:
             overlay = pygame.Surface((width, height), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, 100))
             screen.blit(overlay, (0, 0))
-            pause_text = font.render("PAUSED (Press 'Q' to Resume)", True, (255, 255, 255))
+            pause_text = font_main.render("PAUSED (Press 'Q' to Resume)", True, (255, 255, 255))
             screen.blit(pause_text, (width//2 - 200, height//2))
 
         elif game_state == STATE_CHOOSE_WEAPON:
@@ -3162,7 +3171,7 @@ async def main():
             overlay.fill((0, 0, 0, 200))
             screen.blit(overlay, (0, 0))
         
-            prompt_text = font.render("Choose Your Starting Weapon", True, (255, 255, 255))
+            prompt_text = font_main.render("Choose Your Starting Weapon", True, (255, 255, 255))
             screen.blit(prompt_text, (width//2 - prompt_text.get_width()//2, 40))
         
             cards = [
@@ -3189,13 +3198,11 @@ async def main():
                 pygame.draw.rect(screen, card["color"], draw_rect, border_radius=10)
                 pygame.draw.rect(screen, (255, 255, 255), draw_rect, 2, border_radius=10)
             
-                name_font = pygame.font.SysFont(None, 40)
-                name_text = name_font.render(card["name"], True, (255, 255, 255))
+                name_text = font_weapon_name.render(card["name"], True, (255, 255, 255))
                 screen.blit(name_text, (cx + 10, draw_rect.y + 20))
             
-                desc_font = pygame.font.SysFont(None, 24)
                 for di, d_line in enumerate(card["desc"].split("\n")):
-                    dt = desc_font.render(d_line, True, (220, 220, 220))
+                    dt = font_weapon_desc.render(d_line, True, (220, 220, 220))
                     screen.blit(dt, (cx + 10, draw_rect.y + 70 + di * 25))
 
         elif game_state == STATE_UPGRADE:
@@ -3203,7 +3210,7 @@ async def main():
             overlay.fill((0, 0, 0, 200))
             screen.blit(overlay, (0, 0))
         
-            prompt_text = font.render(f"WAVE {wave_number-1} CLEARED! Choose Upgrade", True, (255, 255, 100))
+            prompt_text = font_main.render(f"WAVE {wave_number-1} CLEARED! Choose Upgrade", True, (255, 255, 100))
             screen.blit(prompt_text, (width//2 - prompt_text.get_width()//2, 40))
         
             if hasattr(player.character, 'current_upgrades'):
@@ -3232,23 +3239,20 @@ async def main():
                     pygame.draw.rect(screen, color, draw_rect, border_radius=10)
                     pygame.draw.rect(screen, (255, 255, 255), draw_rect, 2, border_radius=10)
                 
-                    name_font = pygame.font.SysFont(None, 34)
-                    name_text = name_font.render(upgrade["name"], True, (255, 255, 255))
+                    name_text = font_upgrade_name.render(upgrade["name"], True, (255, 255, 255))
                     screen.blit(name_text, (cx + 10, draw_rect.y + 20))
                 
-                    desc_font = pygame.font.SysFont(None, 24)
                     # Word wrap or split lines
                     desc = upgrade["desc"]
-                    dt = desc_font.render(desc, True, (220, 220, 220))
+                    dt = font_upgrade_desc.render(desc, True, (220, 220, 220))
                     screen.blit(dt, (cx + 10, draw_rect.y + 70))
 
         elif game_state == STATE_GAMEOVER:
             overlay = pygame.Surface((width, height), pygame.SRCALPHA)
             overlay.fill((200, 0, 0, 150))
             screen.blit(overlay, (0, 0))
-            go_font = pygame.font.SysFont(None, 100)
-            go_text = go_font.render("GAME OVER", True, (255, 255, 255))
-            retry_text = font.render("Press 'R' to Retry", True, (255, 255, 255))
+            go_text = font_gameover.render("GAME OVER", True, (255, 255, 255))
+            retry_text = font_main.render("Press 'R' to Retry", True, (255, 255, 255))
             screen.blit(go_text, (width//2 - 220, height//2 - 50))
             screen.blit(retry_text, (width//2 - 150, height//2 + 50))
             if keys[pygame.K_r]:
