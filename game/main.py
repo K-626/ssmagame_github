@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import pygame
 import math # 数学的な計算（円や角度）のために追加
 import random
@@ -11,15 +12,16 @@ ground=540
 # pygame.init() and screen setup moved inside main() for better stability in web environment
 
 # --- ゲーム状態の定義 ---
-STATE_PLAYING = "playing"
-STATE_PAUSED = "paused"
-STATE_GAMEOVER = "gameover"
-STATE_LOBBY = "lobby"
-STATE_SELECT_CHAR = "select_char"
-STATE_CHOOSE_WEAPON = "choose_weapon"
-STATE_UPGRADE = "upgrade"
-STATE_SETTINGS = "settings"
-STATE_REPLACE_SKILL = "replace_skill"
+STATE_TITLE = "title"         # タイトル画面（未実装だが定義）
+STATE_LOBBY = "lobby"         # キャラクター選択前のロビー状態
+STATE_PLAYING = "playing"     # メインの戦闘・探索中
+STATE_PAUSED = "paused"       # ポーズメニュー表示中
+STATE_GAMEOVER = "gameover"   # ゲームオーバー画面
+STATE_SELECT_CHAR = "select_char" # キャラクター選択中（転生者モード切替含む）
+STATE_CHOOSE_WEAPON = "choose_weapon" # 武器選択
+STATE_UPGRADE = "upgrade"     # ウェーブクリア後のスキル・ステータス強化
+STATE_SETTINGS = "settings"   # キー操作設定
+STATE_REPLACE_SKILL = "replace_skill" # スキル上限時に新しいスキルと入れ替える画面
 
 # --- キー設定 ---
 key_config = {
@@ -84,20 +86,26 @@ PLATFORM_H = 12
 
 # --- スキル クラス定義 ---
 class Skill:
+    """
+    スキルの基底クラス。
+    クールタイム管理、発動判定、基本的な描画ロジックを持ちます。
+    """
     def __init__(self, x, y, max_cool, color_ready, color_charge):
-        self.x = x
-        self.y = y
-        self.cool = 0
-        self.max_cool = max_cool
-        self.color_ready = color_ready
-        self.color_charge = color_charge
+        self.x = x                          # UI表示時のX座標
+        self.y = y                          # UI表示時のY座標
+        self.cool = 0                       # 現在のクールタイム残量（0で発動可能）
+        self.max_cool = max_cool            # スキルの最大クールタイム
+        self.color_ready = color_ready      # 使用可能時のアイコンカラー
+        self.color_charge = color_charge    # 充電中のアイコンカラー
 
     def update(self, enemies=None, cooldown_speed=1, player=None):
+        """毎フレームのクールタイム減少処理"""
         if self.cool > 0:
             self.cool -= cooldown_speed
             if self.cool < 0: self.cool = 0
 
     def activate(self, player, enemies=None):
+        """スキル発動の試行。クールタイム中ならFalseを返す"""
         if self.cool == 0:
             self.cool = self.max_cool
             return True
@@ -700,44 +708,63 @@ class WarCrySkill(Skill):
 
 # --- キャラクター クラス定義 ---
 class Character:
+    """
+    全キャラクターの共通基盤となるクラス。
+    旧「転生者」クラスのロジックが統合されており、全キャラでローグライクな強化が可能です。
+    """
     def __init__(self, player):
         self.player = player
-        self.skills = []
-        self.is_reincarnator_mode = False
-        self.current_upgrades = []
-        self.queued_skill = None # For replacement logic
+        self.skills = []                 # 所持スキルのインスタンス
+        self.is_reincarnator_mode = False # 転生者モードフラグ（キャラ選択時に決定）
+        self.current_upgrades = []       # アップグレード選択肢
+        self.queued_skill = None         # 入れ替え待機中の新規スキル
 
     def handle_event(self, event, enemies):
+        """
+        全キャラクター共通のスキル発動キー処理。
+        所持しているスキルのリストを順番にキーに割り当てます。
+        """
         if event.type == pygame.KEYDOWN:
-            keys = [key_config['skill_1'], key_config['skill_2'], key_config['skill_3'], key_config['skill_4'], key_config['skill_5']]
+            # 各スキルの発動キー設定
+            keys = [key_config['skill_1'], key_config['skill_2'], key_config['skill_3'], 
+                    key_config['skill_4'], key_config['skill_5']]
             for i, k in enumerate(keys):
                 if event.key == k and i < len(self.skills):
+                    # 敵情報を必要とするスキルかチェックして発動
                     self.skills[i].activate(self.player, enemies)
 
     def on_sword_hit(self, enemy, source_facing):
-        # どのキャラでもエンチャントスキルがあれば効果を発揮
+        """剣攻撃が敵にヒットした際の追加効果処理（エンチャントスキル用）"""
         for s in self.skills:
+            # 氷付与状態のチェック
             if type(s).__name__ == "IceEnchantSkill" and getattr(s, 'active_timer', 0) > 0:
                 enemy.frozen_timer = 120
+            # 炎付与状態のチェック
             if type(s).__name__ == "FireEnchantSkill" and getattr(s, 'active_timer', 0) > 0:
                 enemy.burn_timer = 180
                 enemy.take_damage(1, source_facing, status_effect=True, element='fire')
 
     def update(self, keys, enemies, cooldown_speed):
-        # エナジースキルなどの全体バフ
+        """
+        キャラクターの状態更新。全スキルのクールタイムや状態変化を処理します。
+        """
+        # 全体バフ効果の適用計算（加速スキルなど）
         cs = cooldown_speed
         for s in self.skills:
             if type(s).__name__ == "EnergySkill" and getattr(s, 'active_timer', 0) > 0:
-                cs *= 2
+                cs *= 2 # クールタイムの減少速度を2倍にする
         
+        # 各スキルインスタンスの個別更新
         for s in self.skills: 
             s.update(enemies, cs, player=self.player)
             
-        # 特定のスキルによるプレイヤーの状態変化
+        # 特定の持続スキルによるプレイヤー能力値の動的な変更
         for s in self.skills:
+            # ブレイブチャージ（暴走）状態
             if type(s).__name__ == "BraveChargeSkill" and getattr(s, 'active_timer', 0) > 0:
                 self.player.damage_multiplier = max(self.player.damage_multiplier, 2)
                 self.player.move_speed = max(self.player.move_speed, 2.0)
+            # 重力スキルによる落下速度の軽減
             if type(s).__name__ == "GravitySkill" and getattr(s, 'range', 0) > 0:
                 self.player.vy += 0.3
 
@@ -762,7 +789,15 @@ class Character:
             'RoarSkill': '咆哮', 'AmpuleSkill': 'アンプル', 'RampageSkill': '暴走',
         }
         skill_keys = ['J', 'K', 'L', 'N', 'M']
-        font_sm = pygame.font.SysFont('Yu Gothic', 14)
+        # UI用にスキル名を日本語で表示。フォントは環境に合わせていくつか試行
+        jp_fonts = ['msgothic', 'yugothic', 'meiryo', 'msuigothic', 'arial']
+        font_sm = None
+        for f in jp_fonts:
+            try:
+                font_sm = pygame.font.SysFont(f, 14)
+                if font_sm: break
+            except: continue
+        if not font_sm: font_sm = pygame.font.SysFont(None, 14)
         # UI用にスキル位置を自動調整
         for i, s in enumerate(self.skills):
             s.x = 15 + i * 60
@@ -784,18 +819,19 @@ class Character:
     def get_jump_power(self): return -15
 
     def generate_upgrades(self):
+        """ウェーブクリア後の報酬（ステータスUPや新スキル）を3つ生成します"""
+        # ステータスアップ項目のプール
         pool = [
-            {"type": "heal", "name": "Heal", "desc": "Recover 5 HP"},
-            {"type": "maxhp", "name": "Max HP Up", "desc": "Max HP +3, Heal 3"},
-            {"type": "jump", "name": "Jump Up", "desc": "Max Jumps +1"},
-            {"type": "attack", "name": "Attack Up", "desc": "Bonus Damage +1"},
-            {"type": "defense", "name": "Defense Up", "desc": "-1 Damage Taken"},
-            {"type": "speed", "name": "Speed Up", "desc": "Move Speed +20%"},
-            {"type": "cd", "name": "Cooldown", "desc": "Cooldown Speed +20%"}
+            {"type": "heal", "name": "HP回復", "desc": "HPを5回復する"},
+            {"type": "maxhp", "name": "最大HP増加", "desc": "最大HP+3、HPを3回復する"},
+            {"type": "jump", "name": "ジャンプ回数+1", "desc": "空中ジャンプが1回多く可能になる"},
+            {"type": "attack", "name": "攻撃力UP", "desc": "基本ダメージに+1加算する"},
+            {"type": "defense", "name": "防御力UP", "desc": "受けるダメージを1軽減する"},
+            {"type": "speed", "name": "速度UP", "desc": "移動速度が20%上昇する"},
+            {"type": "cd", "name": "クールタイム短縮", "desc": "スキルの回転率が20%上昇する"}
         ]
         
-        # すべてのスキルクラスをインポート（MeteorSkillなどは個別に定義されている）
-        # main.py内で定義されているスキルをリストアップ
+        # main.py内で定義されている全スキルクラス
         all_skills_classes = [MagicSwordSkill, ThunderSkill, IceEnchantSkill, FireEnchantSkill, BraveChargeSkill,
                               HammerThrowSkill, SuperArmorSkill, EnergySkill, EarthquakeSkill, WarCrySkill,
                               LavaSkill, EruptionSkill, FlameDashSkill, MeteorSkill,
@@ -803,15 +839,21 @@ class Character:
                               JavelinThrowSkill, VaultingStrikeSkill, RapidThrustsSkill, SweepingStrikeSkill, DragonDiveSkill,
                               RisingStrikeSkill, DashStrikeSkill, EnhancedFireSkill]
                               
+        # 既に持っているスキルを除外して候補を作成
         my_skill_types = [type(s) for s in self.skills]
         unacquired = [s for s in all_skills_classes if s not in my_skill_types]
         random.shuffle(unacquired)
+        
+        # 未修得スキルを最大2つまで報酬候補に加える
         for i in range(min(2, len(unacquired))): 
-            pool.append({"type": "skill", "name": "New Skill!", "desc": "Acquire " + unacquired[i].__name__.replace("Skill", ""), "skill_class": unacquired[i]})
+            name = unacquired[i].__name__.replace("Skill", "")
+            pool.append({"type": "skill", "name": "【新スキル】", "desc": f"技「{name}」を習得する", "skill_class": unacquired[i]})
             
+        # プールからランダムに3つ選択して保持
         self.current_upgrades = random.sample(pool, min(3, len(pool)))
 
     def apply_upgrade(self, upgrade):
+        """選択された報酬をプレイヤーに適用します。スキル枠がいっぱいなら入れ替え画面へ遷移します。"""
         global game_state
         if upgrade["type"] == "heal":
             self.player.hp = min(self.player.max_hp, self.player.hp + 5)
@@ -829,13 +871,16 @@ class Character:
         elif upgrade["type"] == "cd":
             self.player.cooldown_speed_mult += 0.2
         elif upgrade["type"] == "skill":
+            # 新しいスキルのインスタンスを作成（表示位置は仮）
             new_skill = upgrade["skill_class"](0, 15)
             if len(self.skills) < 5:
+                # 5枠未満なら即時習得
                 self.skills.append(new_skill)
             else:
+                # 5枠埋まっている場合は入れ替え待機状態にする
                 self.queued_skill = new_skill
                 game_state = STATE_REPLACE_SKILL
-                return False # 特例として wave_number を進めないためのフラグ（呼び出し側で処理）
+                return False # 特例：次ウェーブに進まず入れ替え入力を待つ
         return True
 
 
@@ -999,14 +1044,16 @@ class Warrior(Character):
         return -12 # ジャンプ低い
 
     def handle_event(self, event, enemies):
-        super().handle_event(event, enemies)
+        """戦士の入力イベント処理（基本攻撃とスキルの個別発動）"""
+        super().handle_event(event, enemies) # J,K,L,N,Mキーの共通処理
         if event.type == pygame.KEYDOWN:
             if event.key == key_config['attack'] and self.hammering == 0:
-                self.hammering = 15 # 振りが遅い
+                self.hammering = 20 # 打撃の振り下ろしフレーム（15から10へ高速化）
                 self.hit_enemies = []
             if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
                 self.player.vy = self.player.jump_power
                 self.player.jumpcount -= 1
+            # 固有スキルの個別発動（キー設定から取得）
             if event.key == key_config['skill_1']: self.skill_throw.activate(self.player, enemies)
             if event.key == key_config['skill_2']: self.skill_armor.activate(self.player, enemies)
             if event.key == key_config['skill_3']: self.skill_energy.activate(self.player, enemies)
@@ -1024,10 +1071,10 @@ class Warrior(Character):
         cs = 2 if self.skill_energy.active_timer > 0 else cooldown_speed
         super().update(keys, enemies, cs)
         
-        # ハンマー攻撃の判定
+        # ハンマーの当たり判定処理
         if self.hammering > 0:
             self.hammering -= 1
-            if self.hammering < 10: # 振り下ろし後半に判定発生
+            if self.hammering < 6: # 10フレーム中、後半の6フレームで判定発生
                 hx = self.player.x + (60 * self.player.facing)
                 hy = self.player.y + 20
                 if enemies:
@@ -1070,6 +1117,7 @@ class Warrior(Character):
 
 
 class Pyromancer(Character):
+    """炎の魔術師：遠距離からの火球攻撃と、広範囲の炎スキルを得意とする"""
     def __init__(self, player):
         super().__init__(player)
         self.skill_lava = LavaSkill(15, 15)
@@ -1078,7 +1126,7 @@ class Pyromancer(Character):
         self.skill_flamedash = FlameDashSkill(195, 15)
         self.skill_meteor = MeteorSkill(255, 15)
         self.skills = [self.skill_lava, self.skill_enhanced, self.skill_eruption, self.skill_flamedash, self.skill_meteor]
-        self.fireballs = []
+        self.fireballs = [] # 現在画面上にある通常攻撃の火球
 
     def get_max_hp(self):
         return 7 # 低耐久
@@ -1292,6 +1340,7 @@ class DragonDiveSkill(Skill):
             pygame.draw.polygon(screen, (50, 200, 200), [(self.player_ref.x+20, self.player_ref.y-20), (self.player_ref.x+50, self.player_ref.y+50), (self.player_ref.x-10, self.player_ref.y+50)])
 
 class Lancer(Character):
+    """槍使い：中距離からの強力な突き攻撃と、機動力を活かしたスキルを持つ"""
     def __init__(self, player):
         super().__init__(player)
         self.skill_javelin = JavelinThrowSkill(15, 15)
@@ -1300,7 +1349,7 @@ class Lancer(Character):
         self.skill_sweep = SweepingStrikeSkill(195, 15)
         self.skill_dragondive = DragonDiveSkill(255, 15)
         self.skills = [self.skill_javelin, self.skill_vault, self.skill_rapid, self.skill_sweep, self.skill_dragondive]
-        self.thrusting = 0
+        self.thrusting = 0 # 突き攻撃の持続タイマー
         self.hit_enemies = []
 
     def get_max_hp(self):
@@ -1362,6 +1411,7 @@ class Lancer(Character):
                 screen.blit(flash_surf, (px + (reach - 30) * self.player.facing if self.player.facing == 1 else px - reach - 30, py - 10))
 
 class Swordsman(Character):
+    """剣士：最も標準的なキャラクター。近接攻撃と移動スキルのバランスが良い"""
     def __init__(self, player):
         super().__init__(player)
         self.skill_dash_strike = DashStrikeSkill(15, 15)
@@ -1407,6 +1457,7 @@ class Swordsman(Character):
         super().draw_effects(screen)
 
 class Archer(Character):
+    """弓兵：遠距離攻撃に特化。配置型のボムや、軌道を操る矢のスキルを持つ"""
     def __init__(self, player):
         super().__init__(player)
         self.skill_pierce = PiercingArrowSkill(15, 15)
@@ -1415,7 +1466,7 @@ class Archer(Character):
         self.skill_rain = ArrowRainSkill(195, 15)
         self.skill_pin = PinningArrowSkill(255, 15)
         self.skills = [self.skill_pierce, self.skill_mirror, self.skill_warp, self.skill_rain, self.skill_pin]
-        self.bombs = [] # [x, y, timer, source_facing]
+        self.bombs = [] # 画面上に置かれたボムのリスト
 
     def get_max_hp(self):
         return 10
@@ -1690,19 +1741,23 @@ class RampageSkill(Skill):
         pass
 
 class MonsterBeta(Character):
-    """怪物β: アンプルと暴走で戦う獣型キャラ"""
+    """
+    怪物β: アンプル（自己強化アイテム）と暴走状態を組み合わせて戦う特殊な獣型キャラクター。
+    """
     def __init__(self, player):
         super().__init__(player)
+        # スキルの初期化（アイコン位置を指定）
         self.skill_pounce = PounceSkill(15, 15)
         self.skill_scale = ScaleProjectileSkill(75, 15)
         self.skill_roar = RoarSkill(135, 15)
         self.skill_ampule = AmpuleSkill(195, 15)
         self.skill_rampage = RampageSkill(255, 15)
+        # 基底クラスの所持リストに登録
         self.skills = [self.skill_pounce, self.skill_scale, self.skill_roar, self.skill_ampule, self.skill_rampage]
-        self.scratch_timer = 0
-        self.hit_enemies = []
-        player._ampule_count = 0
-        player._monster_rampage = 0
+        self.scratch_timer = 0  # 近接攻撃の持続タイマー
+        self.hit_enemies = []   # 1回の攻撃でヒット済みの敵リスト
+        player._ampule_count = 0     # アンプルの所持数（プレイヤー変数に保持）
+        player._monster_rampage = 0  # 暴走タイマー
 
     def get_max_hp(self): return 12
     def get_speed(self): return 1.5
@@ -1813,6 +1868,9 @@ class MonsterBeta(Character):
 
 # --- プレイヤー クラス定義 ---
 class Player:
+    """
+    プレイヤーの物理挙動、描画、キャラクター（クラス）の管理を行う。
+    """
     def __init__(self):
         self.x, self.y = 400, 350
         self.width, self.height = 40, 40
@@ -1824,18 +1882,18 @@ class Player:
         self.jump_count_max = 2
         self.jumpcount = 2
         self.facing = 1
-        self.swording = 0
+        self.swording = 0             # 短距離攻撃（剣）の持続タイマー
         self.sword_length = 120
         self.hp = 10
         self.max_hp = 10
         self.defense = 0
-        self.bonus_damage = 0
-        self.cooldown_speed_mult = 1.0
-        self.hit_timer = 0
+        self.bonus_damage = 0         # アップグレードによる追加ダメージ
+        self.cooldown_speed_mult = 1.0 # クールタイム短縮倍率
+        self.hit_timer = 0            # 被弾時のノックバック/点滅タイマー
 
-        self.character = None
-        self.invincible_timer = 0
-        self.reincarnator_mode = False # Persistence for mode toggle
+        self.character = None         # 現在使用中のキャラクタークラスのインスタンス
+        self.invincible_timer = 0     # 無敵タイマー
+        self.reincarnator_mode = False # キャラ選択時の設定保持用
         self.skill_m = MirrorSkill(15, 15)
         self.skill_g = GravitySkill(75, 15)
         self.skill_i = IceSkill(135, 15)
@@ -2842,7 +2900,16 @@ async def main():
                             wave_start_wait_timer = 60
                             game_state = STATE_PLAYING
                             break
-
+            elif game_state == STATE_UPGRADE:
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    mx, my = pygame.mouse.get_pos()
+                    scale = 0.6
+                    card_w, card_h = int(280 * scale), int(420 * scale)
+                    spacing = 50
+                    total_w = 3 * card_w + 2 * spacing
+                    start_x = (width - total_w) // 2
+                    start_y = height // 2 - card_h // 2
+                    
                     if hasattr(player.character, 'current_upgrades'):
                         for i, upgrade in enumerate(player.character.current_upgrades):
                             rect = pygame.Rect(start_x + i * (card_w + spacing), start_y, card_w, card_h)
@@ -2851,17 +2918,20 @@ async def main():
                                     start_next_wave()
                                     game_state = STATE_PLAYING
                                 else:
-                                    # apply_upgrade returned False, meaning we transitioned to STATE_REPLACE_SKILL
-                                    # The wave is NOT started yet; it will start after replacement.
+                                    # REPLACE 状態に遷移した（waveは入れ替え後に開始）
                                     pass
                                 break
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    # 報酬をスキップ
+                    start_next_wave()
+                    game_state = STATE_PLAYING
 
             elif game_state == STATE_REPLACE_SKILL:
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     mx, my = pygame.mouse.get_pos()
-                    # 現スキルの表示位置と合わせて判定
+                    # 描画(200 + i * 160)と合わせた位置で判定
                     for i in range(len(player.character.skills)):
-                        rect = pygame.Rect(15 + i * 60, 15, 50, 50)
+                        rect = pygame.Rect(200 + i * 160, 250, 80, 80)
                         if rect.collidepoint(mx, my):
                             # スキルを入れ替え
                             player.character.skills[i] = player.character.queued_skill
