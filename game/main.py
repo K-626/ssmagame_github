@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 import pygame
-import math # 数学的な計算（円や角度）のために追加
+import math # for mathematical calculations (circles, angles)
 import random
 import asyncio
+
 
 width=1200  
 height=600
@@ -10,21 +11,25 @@ height=600
 ground=540
 
 # pygame.init() and screen setup moved inside main() for better stability in web environment
+screen = None
 
-# --- ゲーム状態の定義 ---
-STATE_TITLE = "title"         # タイトル画面（未実装だが定義）
-STATE_LOBBY = "lobby"         # キャラクター選択前のロビー状態
-STATE_PLAYING = "playing"     # メインの戦闘・探索中
-STATE_PAUSED = "paused"       # ポーズメニュー表示中
-STATE_GAMEOVER = "gameover"   # ゲームオーバー画面
-STATE_SELECT_CHAR = "select_char" # キャラクター選択中（転生者モード切替含む）
-STATE_CHOOSE_WEAPON = "choose_weapon" # 武器選択
-STATE_UPGRADE = "upgrade"     # ウェーブクリア後のスキル・ステータス強化
-STATE_SETTINGS = "settings"   # キー操作設定
-STATE_REPLACE_SKILL = "replace_skill" # スキル上限時に新しいスキルと入れ替える画面
-STATE_BOSS_REWARD = "boss_reward"    # ボス撃破後の特別報酬選択
 
-# --- キー設定 ---
+# --- Game State Definitions ---
+STATE_TITLE = "title"         # Title screen (defined but not implemented)
+STATE_LOBBY = "lobby"         # Lobby state before character selection
+STATE_PLAYING = "playing"     # Main combat/exploration state
+STATE_PAUSED = "paused"       # Pause menu active
+STATE_GAMEOVER = "gameover"   # Game over screen
+STATE_SELECT_CHAR = "select_char" # Character selection active (including Reincarnator mode toggle)
+STATE_CHOOSE_WEAPON = "choose_weapon" # Weapon selection
+STATE_UPGRADE = "upgrade"     # Skill/Status upgrade after wave clear
+STATE_SETTINGS = "settings"   # Key configuration settings
+STATE_REPLACE_SKILL = "replace_skill" # Skill replacement screen when limit reached
+STATE_BOSS_REWARD = "boss_reward"    # Special reward selection after boss defeat
+
+
+# --- Key Configuration ---
+
 key_config = {
     'move_left': pygame.K_LEFT,
     'move_right': pygame.K_RIGHT,
@@ -49,13 +54,13 @@ KEY_ACTION_NAMES = {
 
 game_state = STATE_LOBBY
 
-# --- スマートフォン・タッチ操作用設定 ---
+# --- Smartphone / Touch Control Settings ---
 smartphone_mode = False
 active_fingers = {} # finger_id -> (last_x, last_y)
 touch_keys = {
     'left': False, 'right': False, 'up': False, 'attack': False
 }
-# 仮想ボタンの配置 (1200x600想定)
+# Virtual Pad Layout (1200x600 resolution)
 V_PAD = {
     'left': pygame.Rect(40, 460, 100, 100),
     'right': pygame.Rect(180, 460, 100, 100),
@@ -63,17 +68,19 @@ V_PAD = {
     'attack': pygame.Rect(950, 400, 200, 160)
 }
 
-# 反発係数 (衝突分離用)
+
+# Push factor (for collision separation)
 PUSH_FORCE = 0.5 
 
 def separate_actors(actors):
-    """アクター同士の重なりを解消する"""
+    """Resolve overlap between actors"""
     for i in range(len(actors)):
         for j in range(i + 1, len(actors)):
             a, b = actors[i], actors[j]
             if not a or not b or a == b: continue
-            # 敵は重複を許可するため、分離対象から外す
+            # Enemies allow overlap, so exclude them from separation
             if isinstance(a, Enemy) or isinstance(b, Enemy): continue
+
             
             w_a = getattr(a, 'width', 40)
             h_a = getattr(a, 'height', 40)
@@ -90,47 +97,55 @@ def separate_actors(actors):
                 b.x += overlap_x * PUSH_FORCE * direction
 wave_number = 0
 is_combat_mode = False
-wave_clear_timer = 0 # ウェーブ間の待ち時間用
-wave_start_wait_timer = 0 # ウェーブ開始時の待機用
+wave_clear_timer = 0 # Wait timer between waves
+wave_start_wait_timer = 0 # Wait timer at wave start
 
-# --- 足場 ---
+
+# --- Platforms ---
+
 PLATFORM_X = 450
 PLATFORM_Y = 380
 PLATFORM_W = 300
 PLATFORM_H = 12
 
-# --- スキル クラス定義 ---
+# --- Skill Class Definitions ---
+
 class Skill:
     """
-    スキルの基底クラス。
-    クールタイム管理、発動判定、基本的な描画ロジックを持ちます。
+    Base class for skills.
+    Handles cooldown management, activation, and basic drawing logic.
     """
+
     def __init__(self, x, y, max_cool, color_ready, color_charge):
-        self.x = x                          # UI表示時のX座標
-        self.y = y                          # UI表示時のY座標
-        self.cool = 0                       # 現在のクールタイム残量（0で発動可能）
-        self.max_cool = max_cool            # スキルの最大クールタイム
-        self.color_ready = color_ready      # 使用可能時のアイコンカラー
-        self.color_charge = color_charge    # 充電中のアイコンカラー
-        self.damage_bonus = 0               # 進化などによる追加ダメージ
+        self.x = x                          # X coordinate for UI
+        self.y = y                          # Y coordinate for UI
+        self.cool = 0                       # Current cooldown remaining (0 for ready)
+        self.max_cool = max_cool            # Max cooldown for the skill
+        self.color_ready = color_ready      # Icon color when ready
+        self.color_charge = color_charge    # Icon color when charging
+        self.damage_bonus = 0               # Additional damage from evolution, etc.
+
 
     def update(self, enemies=None, cooldown_speed=1, player=None):
-        """毎フレームのクールタイム減少処理"""
+        """Decrease cooldown per frame"""
         if self.cool > 0:
             cs = cooldown_speed
-            # バフスキルの場合はクールタイム短縮に制限をかける (1.3倍ルール)
+            # Apply limit to cooldown reduction for buff skills (1.3x rule)
+
             if hasattr(self, 'active_timer') and hasattr(self, 'max_cool'):
                 duration = getattr(self, 'initial_duration', 0)
                 if duration > 0:
                     min_cool_time = duration * 1.3
-                    # 実際の冷却速度を制限する (現在値/目標時間)
+                    # Limit actual cooling speed (current / target time)
                     cs = min(cs, self.max_cool / min_cool_time)
+
             
             self.cool -= cs
             if self.cool < 0: self.cool = 0
 
     def activate(self, player, enemies=None):
-        """スキル発動の試行。クールタイム中ならFalseを返す"""
+        """Attempt to activate skill. Returns False if on cooldown."""
+
         if self.cool == 0:
             self.cool = self.max_cool
             return True
@@ -197,12 +212,14 @@ class IceSkill(Skill):
         if super().activate(player, enemies):
             self.range = 400
             self.place = player.x - self.width / 2
-            # 範囲内の接地している敵を凍結
+            # Freeze grounded enemies within range
             if enemies:
+
                 for e in enemies:
                     if e.hp > 0 and self.place < e.x + e.width and e.x < self.place + self.width and e.y + e.height >= ground - 5:
                         if hasattr(e, 'frozen_timer'):
-                            e.frozen_timer = 120 # 2秒間
+                            e.frozen_timer = 120 # 2 seconds
+
             return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
@@ -225,8 +242,9 @@ class DashSkill(Skill):
 
 class LavaSkill(Skill):
     def __init__(self, x, y):
-        # 溶岩らしく赤・オレンジ系 (color_charge: 鮮やかな赤, color_ready: 燃えるようなオレンジ)
+        # Red/Orange theme for lava (color_charge: bright red, color_ready: fiery orange)
         super().__init__(x, y, 300, (255, 69, 0), (255, 0, 0))
+
         self.range = 0
         self.place = 0
         self.width = 400
@@ -245,10 +263,12 @@ class LavaSkill(Skill):
                     if e.hp > 0 and self.place < e.x + e.width and e.x < self.place + self.width and e.y + e.height >= ground - 5:
                         e.burn_timer = 180
                         e.take_damage(1 + self.damage_bonus, status_effect=True, element='fire')
+
     def draw_effect(self, screen):
         if self.range > 0:
-            # 透過っぽく見せるために少し暗い赤で地面を描画
+            # Draw ground in slightly dark red for fake transparency
             pygame.draw.rect(screen, (200, 0, 0), (self.place, ground, self.width, 100))
+
 
 class FireSkill(Skill):
     def __init__(self, x, y):
@@ -259,31 +279,35 @@ class FireSkill(Skill):
         self.speed = 15
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            # 打ち出した時のプレイヤーのスピードを加味
+            # Factor in player's speed when launched
             vx = (self.speed + abs(player.vx)) * player.facing
-            # プレイヤーの中心付近から射出 [x, y, vx, timer, hit_enemies]
+            # Launch from near player center [x, y, vx, timer, hit_enemies]
             self.bullets.append([player.x + 20, player.y + 10, vx, 60, []])
             return True
+
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
         new_bullets = []
         for b in self.bullets:
-            b[0] += b[2] # x移動
-            b[3] -= 1 # 寿命
-            # 当たり判定
+            b[0] += b[2] # x movement
+            b[3] -= 1 # lifetime
+            # Collision detection
             bx, by = b[0], b[1]
+
             if enemies:
                 for e in enemies:
                     if e.hp > 0 and e.x <= bx <= e.x + e.width and e.y <= by <= e.y + e.height:
-                        # 貫通：まだこの弾が当たっていない敵ならダメージ
+                        # Pierce: Deal damage if enemy hasn't been hit by this bullet yet
                         if e not in b[4]:
                             if e.take_damage(1 + self.damage_bonus, 1 if b[2] > 0 else -1, element='fire'):
                                 b[4].append(e)
+
             
-            # 消滅判定：寿命切れ or 画面外
+            # Expiration check: lifetime expired or out of bounds
             if b[3] > 0 and -100 < b[0] < width + 100:
                 new_bullets.append(b)
+
         self.bullets = new_bullets
     def draw_effect(self, screen):
         for b in self.bullets:
@@ -291,25 +315,28 @@ class FireSkill(Skill):
 
 class ThunderSkill(Skill):
     def __init__(self, x, y):
-        super().__init__(x, y, 200, (255, 255, 0), (200, 200, 0)) # クールタイムを5倍(40->200)に
+        super().__init__(x, y, 200, (255, 255, 0), (200, 200, 0)) # Increased cooldown by 5x (40->200)
+
         self.range = 0
         self.points = []
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            self.range = 30 # 表示時間
-            # 生きている敵をリストアップ
+            self.range = 30 # Display duration
+            # List living enemies
+
             alive_enemies = []
             if enemies:
                 alive_enemies = [e for e in enemies if e.hp > 0]
             
             if alive_enemies:
-                # ランダムな敵を選択
+                # Select a random enemy
                 target_enemy = random.choice(alive_enemies)
                 tx = target_enemy.x + target_enemy.width / 2
                 target_enemy.take_damage(2 + self.damage_bonus)
             else:
-                # 敵がいない場合はランダムな位置
+                # If no enemies, pick a random position
                 tx = random.randint(50, width - 50)
+
                 
             self.points = [(tx, 0)]
             curr_y = 0
@@ -318,26 +345,28 @@ class ThunderSkill(Skill):
                 next_x = tx + random.randint(-40, 40)
                 self.points.append((next_x, curr_y))
             
-            # 当たり判定 (雷が落ちた場所 tx を中心に判定)
+            # Collision detection (based on lightning strike location tx)
             for e in enemies:
                 if e.hp > 0:
-                    # 稲妻の中心 Y 軸との距離で判定
+                    # Check distance from lightning center Y-axis
                     if abs((e.x + e.width/2) - tx) < 40:
-                        # 雷は真上からなので source_facing は適当 (0でいいが、一応左右判定)
+                        # Lightning comes from above, so source_facing is arbitrary
                         sf = 1 if e.x < tx else -1
                         e.take_damage(3 + self.damage_bonus, sf)
             return True
+
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
         if self.range > 0: self.range -= 1
     def draw_effect(self, screen):
         if self.range > 0:
-            # 白い稲妻を太めに、少し位置をずらして描画して発光感を出す
+            # Draw thick white lightning with slight offsets for glow effect
             for i in range(2):
                 offset_x = random.randint(-3, 3)
                 p_list = [(p[0] + offset_x, p[1]) for p in self.points]
                 pygame.draw.lines(screen, (255, 255, 255), False, p_list, 5 - i*2)
+
 
 class DashStrikeSkill(Skill):
     def __init__(self, x, y):
@@ -354,13 +383,14 @@ class DashStrikeSkill(Skill):
 
 class BraveChargeSkill(Skill):
     def __init__(self, x, y):
-        # クールタイム900, 持続600
+        # Cooldown 900, Duration 600
         super().__init__(x, y, 900, (255, 200, 0), (200, 100, 0))
         self.active_timer = 0
         self.initial_duration = 600
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            self.active_timer = 600 # 10秒間
+            self.active_timer = 600 # 10 seconds (at 60fps)
+
             self.player_ref = player
             return True
         return False
@@ -379,10 +409,11 @@ class MagicSwordSkill(Skill):
         self.waves = [] # [x, y, vx, timer, hit_enemies]
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            self.active_timer = 999  # 無限（回数制限のみ）にするため大きな値を設定
-            self.swings_left = 6   # 10回まで
+            self.active_timer = 999  # Large value for infinite duration (limit based on swings_left)
+            self.swings_left = 6   # Up to 6 times
             player.swording = 15
             return True
+
         return False
     def launch_wave(self, player):
         if hasattr(self, 'swings_left') and self.swings_left > 0:
@@ -391,22 +422,25 @@ class MagicSwordSkill(Skill):
             self.waves.append([player.x + 20, player.y + 10, vx, 40, []])
             self.swings_left -= 1
             if self.swings_left <= 0:
-                self.active_timer = 0 # 終了
+                self.active_timer = 0 # Finish
+
         
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
-        # active_timerの自然減少を削除（swings_leftが0になるまで持続）
+        # Removed automatic timer decrease (lasts until swings_left is 0)
         
         new_waves = []
         for w in self.waves:
-            w[0] += w[2] # 移動
-            w[3] -= 1 # 寿命
+            w[0] += w[2] # Movement
+            w[3] -= 1 # Lifetime
+
             if enemies:
-                # 三日月の大きさに合わせた当たり判定 (100x180)
+                # Collision detection adjusted to crescent size (100x180)
                 wave_rect = pygame.Rect(w[0] - 50, w[1] - 90, 100, 180)
                 for e in enemies:
                     if e.hp > 0 and wave_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                         if e not in w[4]:
+
                             if e.take_damage(2 + self.damage_bonus, 1 if w[2] > 0 else -1):
                                 w[4].append(e)
             if w[3] > 0: new_waves.append(w)
@@ -414,29 +448,31 @@ class MagicSwordSkill(Skill):
     
     def draw_effect(self, screen):
         for w in self.waves:
-            # 「真ん中が太く、端が細い」本格的な三日月
+            # Crescent shape: thick center, thin ends
             points = []
+
             direction = 1 if w[2] > 0 else -1
             
             base_r = 100
             max_thickness = 40
             angle_range = 75
             
-            # 外側の弧
+            # Outer arc
             for i in range(-angle_range, angle_range + 1, 5):
                 rad = math.radians(i)
                 px = w[0] + math.cos(rad) * base_r * direction
                 py = w[1] + math.sin(rad) * base_r
                 points.append((px, py))
             
-            # 内側の弧 (コサインを使って中央を太く、端を尖らせる)
+            # Inner arc (use cosine to thicken center and taper ends)
             for i in range(angle_range, -angle_range - 1, -5):
                 rad = math.radians(i)
-                # 中央(i=0)で最大、端(i=75)で0近くなるように調整
+                # Adjust thickness: max at center (i=0), near zero at ends (i=angle_range)
                 t = max_thickness * math.cos(math.radians(i * 90 / angle_range))
                 px = w[0] + (math.cos(rad) * base_r - t) * direction
                 py = w[1] + math.sin(rad) * base_r
                 points.append((px, py))
+
             
             if len(points) > 2:
                 pygame.draw.polygon(screen, (100, 200, 255), points)
@@ -461,15 +497,17 @@ class PiercingArrowSkill(Skill):
     def __init__(self, x, y):
         super().__init__(x, y, 180, (200, 200, 200), (100, 100, 100))
         self.aiming = False
-        self.aim_angle = 45 # 初期角度
+        self.aim_angle = 45 # Initial angle
         self.arrows = [] # [x, y, vx, vy, hit_enemies]
+
     def activate(self, player, enemies=None):
         if self.cool == 0 and not self.aiming:
             self.aiming = True
             self.player_ref = player
             self.aim_angle = 0 if player.facing == 1 else 180
-            player.vx = 0 # 構え中は停止
+            player.vx = 0 # Stop while aiming
             return True
+
         elif self.aiming:
             self.aiming = False
             self.cool = self.max_cool
@@ -478,6 +516,7 @@ class PiercingArrowSkill(Skill):
             vy = 25 * math.sin(rad)
             self.arrows.append([player.x + 20, player.y + 20, vx, vy, []])
             return True
+
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
         if not self.aiming:
@@ -489,7 +528,8 @@ class PiercingArrowSkill(Skill):
                 for e in enemies:
                     if e.hp > 0 and e not in a[4] and e.x < a[0] < e.x + e.width and e.y < a[1] < e.y + e.height:
                         if e.take_damage(2 + self.damage_bonus, 1 if a[2] > 0 else -1):
-                            a[4].append(e) # 貫通
+                            a[4].append(e) # Piercing
+
             if -100 < a[0] < width + 100 and -100 < a[1] < height + 100 and a[1] < ground + 20:
                 new_arrows.append(a)
         self.arrows = new_arrows
@@ -636,13 +676,13 @@ class HammerThrowSkill(Skill):
         if self.hammer:
             h = self.hammer; h[0] += h[2]; h[1] += h[3]; h[4] -= 1
             if h[4] < 30 and self.player_ref:
-                # プレイヤーに戻ってくる
+                # [Translated/Cleaned Comment]
                 dx = self.player_ref.x + 20 - h[0]
                 dy = self.player_ref.y + 20 - h[1]
                 dist = max(1, math.hypot(dx, dy))
                 h[2] += (dx / dist) * 2.5
                 h[3] += (dy / dist) * 2.5
-                if dist < 40: # キャッチ
+                if dist < 40: # [Translated/Cleaned Comment]
                     self.hammer = None
                     return
             
@@ -657,8 +697,8 @@ class HammerThrowSkill(Skill):
         if self.hammer:
             angle = pygame.time.get_ticks() % 360
             surf = pygame.Surface((60, 60), pygame.SRCALPHA)
-            pygame.draw.rect(surf, (150, 100, 50), (25, 5, 10, 50))       # 柄
-            pygame.draw.rect(surf, (100, 100, 100), (10, 5, 40, 20))      # 頭
+            pygame.draw.rect(surf, (150, 100, 50), (25, 5, 10, 50))       # [Translated/Cleaned Comment]
+            pygame.draw.rect(surf, (100, 100, 100), (10, 5, 40, 20))      # [Translated/Cleaned Comment]
             rot_surf = pygame.transform.rotate(surf, angle)
             rect = rot_surf.get_rect(center=(int(self.hammer[0]), int(self.hammer[1])))
             screen.blit(rot_surf, rect)
@@ -701,7 +741,7 @@ class EarthquakeSkill(Skill):
                     self.falling = False; self.active_timer = 15
                     if enemies:
                         for e in enemies:
-                            # 地面に接しているキャラ全員に攻撃
+                            # [Translated/Cleaned Comment]
                             if e.hp > 0 and e.y + e.height >= ground - 5:
                                 e.take_damage(6, 1 if e.x > self.player_ref.x else -1, knockback_y=-10, element='heavy')
     def draw_effect(self, screen):
@@ -728,103 +768,108 @@ class WarCrySkill(Skill):
         if self.active_timer > 465 and hasattr(self, 'player_ref') and self.player_ref:
             pygame.draw.circle(screen, (255, 100, 100), (int(self.player_ref.x+20), int(self.player_ref.y+20)), (480-self.active_timer)*20, 5)
 
-# --- キャラクター クラス定義 ---
+# [Translated/Cleaned Comment]
 class Character:
     """
-    全キャラクターの共通基盤となるクラス。
-    旧「転生者」クラスのロジックが統合されており、全キャラでローグライクな強化が可能です。
+                       
+                                               
     """
     def __init__(self, player):
         self.player = player
-        self.skills = []                 # 所持スキルのインスタンス
-        self.is_reincarnator_mode = False # 転生者モードフラグ（キャラ選択時に決定）
-        self.max_skills = 5              # スキル所持上限（ボス報酬で増加可能）
-        self.upgrade_slots = 3           # アップグレード画面の選択肢数
-        self.current_upgrades = []       # アップグレード選択肢
-        self.queued_skill = None         # 入れ替え待機中の新規スキル
+        self.skills = []                 # [Translated/Cleaned Comment]
+        self.is_reincarnator_mode = False # [Translated/Cleaned Comment]
+        self.max_skills = 5              # [Translated/Cleaned Comment]
+        self.upgrade_slots = 3           # [Translated/Cleaned Comment]
+        self.current_upgrades = []       # [Translated/Cleaned Comment]
+        self.queued_skill = None         # [Translated/Cleaned Comment]
 
     def handle_event(self, event, enemies):
         """
-        全キャラクター共通のスキル発動キー処理。
-        所持しているスキルのリストを順番にキーに割り当てます。
+                            
+                                   
         """
         if event.type == pygame.KEYDOWN:
-            # 各スキルの発動キー設定
+            # [Translated/Cleaned Comment]
             keys = [key_config['skill_1'], key_config['skill_2'], key_config['skill_3'], 
                     key_config['skill_4'], key_config['skill_5']]
             for i, k in enumerate(keys):
                 if event.key == k and i < len(self.skills):
-                    # 敵情報を必要とするスキルかチェックして発動
+                    # [Translated/Cleaned Comment]
                     self.skills[i].activate(self.player, enemies)
 
     def on_sword_hit(self, enemy, source_facing):
-        """剣攻撃が敵にヒットした際の追加効果処理（エンチャントスキル用）"""
+        """                               """
         for s in self.skills:
-            # 氷付与状態のチェック
+            # [Translated/Cleaned Comment]
             if type(s).__name__ == "IceEnchantSkill" and getattr(s, 'active_timer', 0) > 0:
                 enemy.frozen_timer = 120
-            # 炎付与状態のチェック
+            # [Translated/Cleaned Comment]
             if type(s).__name__ == "FireEnchantSkill" and getattr(s, 'active_timer', 0) > 0:
                 enemy.burn_timer = 180
                 enemy.take_damage(1, source_facing, status_effect=True, element='fire')
 
     def update(self, keys, enemies, cooldown_speed):
         """
-        キャラクターの状態更新。全スキルのクールタイムや状態変化を処理します。
+        Update character state. Processes skill cooldowns and status changes.
         """
-        # 毎フレーム、ステータスをデフォルト値にリセット（バフ適用前）
+
+        # Reset status to default values each frame (before applying buffs)
         self.player.damage_multiplier = 1.0
         self.player.move_speed = self.get_speed()
         self.player.jump_power = self.get_jump_power()
 
-        # 全体バフ効果の適用計算（加速スキルなど）
+
+        # Global buff calculations (e.g. haste skills)
         cs = cooldown_speed
         for s in self.skills:
             if type(s).__name__ == "BraveChargeSkill" and getattr(s, 'active_timer', 0) > 0:
-                cs *= 2 # クールタイムの減少速度を2倍にする
+                cs *= 2 # Double cooldown reduction speed
+
         
-        # 各スキルインスタンスの個別更新
+        # [Translated/Cleaned Comment]
         for s in self.skills: 
             s.update(enemies, cs, player=self.player)
             
-        # 特定の持続スキルによるプレイヤー能力値の動的な変更
+        # Dynamic status modification based on active skills
         for s in self.skills:
-            # ブレイブチャージ（暴走）状態
+            # Brave Charge (Rampage) state
             if type(s).__name__ == "BraveChargeSkill" and getattr(s, 'active_timer', 0) > 0:
                 self.player.damage_multiplier = max(self.player.damage_multiplier, 2.0)
                 self.player.move_speed = max(self.player.move_speed, 2.0)
-                # ジャンプ力アップ
+                # Boost jump power
                 self.player.jump_power = min(self.player.jump_power, -20)
             
-            # ウォークライ（鼓舞）状態
+            # War Cry (Motivation) state
             if type(s).__name__ == "WarCrySkill" and getattr(s, 'active_timer', 0) > 0:
                 self.player.damage_multiplier = max(self.player.damage_multiplier, 1.5)
+
             
-            # 重力スキルによる落下速度の軽減
+            # Reduce fall speed due to Gravity skill
             if type(s).__name__ == "GravitySkill" and getattr(s, 'range', 0) > 0:
                 self.player.vy += 0.3
+
 
     def draw_effects(self, screen):
         for s in self.skills:
             s.draw_effect(screen)
     def draw_ui(self, screen):
-        # ... (中略)
         SKILL_NAMES = {
-            'MagicSwordSkill': '魔法剣', 'ThunderSkill': '雷', 'IceEnchantSkill': '氷付与',
-            'FireEnchantSkill': '炎付与', 'BraveChargeSkill': '突撃', 'HammerThrowSkill': '投げ槌',
-            'SuperArmorSkill': 'SA', 'EarthquakeSkill': '地震',
-            'WarCrySkill': '鼓舞', 'LavaSkill': '溶岩', 'EruptionSkill': '噴火',
-            'FlameDashSkill': '炎走', 'MeteorSkill': '隕石', 'PiercingArrowSkill': '貫通矢',
-            'MirrorSkill': '反転', 'WarpArrowSkill': 'ワープ', 'ArrowRainSkill': '矢の雨',
-            'PinningArrowSkill': '拘束矢', 'JavelinThrowSkill': '投槍',
-            'VaultingStrikeSkill': '跳撃', 'RapidThrustsSkill': '連撃槍',
-            'SweepingStrikeSkill': 'なぎ払い', 'DragonDiveSkill': '竜降下',
-            'RisingStrikeSkill': '昇撃', 'DashStrikeSkill': '瞬撃',
-            'EnhancedFireSkill': '拡散炎', 'FireSkill': '火球', 'IceSkill': '氷結',
-            'DashSkill': 'ダッシュ', 'GravitySkill': '重力',
-            'PounceSkill': '飛びかかり', 'ScaleProjectileSkill': '鱗赫',
-            'RoarSkill': '咆哮', 'AmpuleSkill': 'アンプル', 'RampageSkill': '暴走',
+            'MagicSwordSkill': 'Magic Sword', 'ThunderSkill': 'Lightning', 'IceEnchantSkill': 'Ice Enchant',
+            'FireEnchantSkill': 'Fire Enchant', 'BraveChargeSkill': 'Charge', 'HammerThrowSkill': 'Hammer Throw',
+            'SuperArmorSkill': 'Super Armor', 'EarthquakeSkill': 'Earthquake',
+            'WarCrySkill': 'War Cry', 'LavaSkill': 'Lava', 'EruptionSkill': 'Eruption',
+            'FlameDashSkill': 'Flame Dash', 'MeteorSkill': 'Meteor', 'PiercingArrowSkill': 'Pierce Arrow',
+            'MirrorSkill': 'Mirror', 'WarpArrowSkill': 'Warp Arrow', 'ArrowRainSkill': 'Arrow Rain',
+            'PinningArrowSkill': 'Pinning Arrow', 'JavelinThrowSkill': 'Javelin',
+            'VaultingStrikeSkill': 'Vault Strike', 'RapidThrustsSkill': 'Rapid Thrusts',
+            'SweepingStrikeSkill': 'Sweep', 'DragonDiveSkill': 'Dragon Dive',
+            'RisingStrikeSkill': 'Rising Strike', 'DashStrikeSkill': 'Dash Strike',
+            'EnhancedFireSkill': 'Spread Fire', 'FireSkill': 'Fireball', 'IceSkill': 'Frost',
+            'DashSkill': 'Dash', 'GravitySkill': 'Gravity',
+            'PounceSkill': 'Pounce', 'ScaleProjectileSkill': 'Scale Blade',
+            'RoarSkill': 'Roar', 'AmpuleSkill': 'Ampule', 'RampageSkill': 'Rampage',
         }
+
         skill_keys = ['J', 'K', 'L', 'N', 'M']
         if not hasattr(Character, '_font_sm') or Character._font_sm is None:
             jp_fonts = ['msgothic', 'yugothic', 'meiryo', 'msuigothic', 'arial']
@@ -849,14 +894,15 @@ class Character:
             screen.blit(ns, (s.x, s.y + 52))
 
     def attack(self, enemies):
-        """通常攻撃を実行（スマホ/キーボード共通）"""
+        """Execute basic attack (common for smartphone/keyboard)"""
         self.player.swording = 12
 
     def handle_event(self, event, enemies):
-        """入力イベントの処理"""
+        """Handle input events"""
         if event.type == pygame.KEYDOWN:
             if event.key == key_config['attack']:
                 self.attack(enemies)
+
 
 
     def update_timers(self): pass
@@ -865,8 +911,9 @@ class Character:
     def get_jump_power(self): return -15
 
     def generate_upgrades(self):
-        """ウェーブクリア後の報酬（ステータスUPや新スキル）を3つ生成します"""
-        # ステータスアップ項目のプール
+        """Generates 3 rewards (status up or new skill) after wave clear"""
+        # Pool for status upgrade items
+
         pool = [
             {"type": "heal", "name": "HP Recovery", "desc": "Restore 5 HP"},
             {"type": "maxhp", "name": "Max HP Increase", "desc": "Max HP +3, Restore 3 HP"},
@@ -877,7 +924,8 @@ class Character:
             {"type": "cd", "name": "Cooldown Reduction", "desc": "Increase skill cooldown speed by 20%"}
         ]
         
-        # main.py内で定義されている全スキルクラス
+        # All skill classes defined in main.py
+
         all_skills_classes = [MagicSwordSkill, ThunderSkill, IceEnchantSkill, FireEnchantSkill, BraveChargeSkill,
                               HammerThrowSkill, SuperArmorSkill, EarthquakeSkill, WarCrySkill,
                               LavaSkill, EruptionSkill, FlameDashSkill, MeteorSkill,
@@ -885,22 +933,25 @@ class Character:
                               JavelinThrowSkill, VaultingStrikeSkill, RapidThrustsSkill, SweepingStrikeSkill, DragonDiveSkill,
                               RisingStrikeSkill, DashStrikeSkill, EnhancedFireSkill]
                               
-        # 既に持っているスキルを除外して候補を作成
+        # List of candidate skills excluding already owned ones
+
         my_skill_types = [type(s) for s in self.skills]
         unacquired = [s for s in all_skills_classes if s not in my_skill_types]
         random.shuffle(unacquired)
         
-        # 未修得スキルを最大2つまで報酬候補に加える
+        # [Translated/Cleaned Comment]
         for i in range(min(2, len(unacquired))): 
             name = unacquired[i].__name__.replace("Skill", "")
             pool.append({"type": "skill", "name": "[New Skill]", "desc": f"Learn the skill '{name}'", "skill_class": unacquired[i]})
             
-        # プールからランダムに選択して保持
+        # Randomly select from pool and store
         self.current_upgrades = random.sample(pool, min(self.upgrade_slots, len(pool)))
 
+
     def apply_upgrade(self, upgrade):
-        """選択された報酬をプレイヤーに適用します。スキル枠がいっぱいなら入れ替え画面へ遷移します。"""
+        """Applies the selected reward to the player. Transitions to replacement screen if slots are full."""
         global game_state
+
         if upgrade["type"] == "heal":
             self.player.hp = min(self.player.max_hp, self.player.hp + 5)
         elif upgrade["type"] == "maxhp":
@@ -917,17 +968,18 @@ class Character:
         elif upgrade["type"] == "cd":
             self.player.cooldown_speed_mult += 0.2
         elif upgrade["type"] == "skill":
-            # 新しいスキルのインスタンスを作成（表示位置は仮）
+            # Create a new skill instance
             new_skill = upgrade["skill_class"](0, 15)
             if len(self.skills) < self.max_skills:
-                # 所持上限未満なら即時習得
+                # If below skill limit, learn immediately
                 self.skills.append(new_skill)
             else:
-                # 5枠埋まっている場合は入れ替え待機状態にする
+                # If 5 slots are full, set to queued skill and enter replacement state
                 self.queued_skill = new_skill
                 game_state = STATE_REPLACE_SKILL
-                return False # 特例：次ウェーブに進まず入れ替え入力を待つ
+                return False # Do not proceed to next wave until replacement is handled
         return True
+
 
 
 
@@ -969,11 +1021,12 @@ class EruptionSkill(Skill):
         self.pillar_x = 0
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            self.active_timer = 90 # 1.5秒間持続
+            self.active_timer = 90 # Lasts 1.5 seconds (at 60fps)
             self.pillar_x = player.x + (150 * player.facing)
             self.source_facing = player.facing
             return True
         return False
+
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
         if self.active_timer > 0:
@@ -982,10 +1035,11 @@ class EruptionSkill(Skill):
                 er_rect = pygame.Rect(self.pillar_x - 40, ground - 300, 80, 300)
                 for e in enemies:
                     if e.hp > 0 and er_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                        e.take_damage(1 + self.damage_bonus, self.source_facing, element='fire') # 毎フレーム判定なので低威力
+                        e.take_damage(1 + self.damage_bonus, self.source_facing, element='fire') # Low damage (hits every frame)
     def draw_effect(self, screen):
         if self.active_timer > 0:
-            # 揺らめく炎の柱
+            # Flickering pillar of fire
+
             for _ in range(15):
                 rw = random.randint(40, 100)
                 rh = random.randint(150, 400)
@@ -1004,23 +1058,25 @@ class FlameDashSkill(Skill):
         self.player_ref = None
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            self.active_timer = 40 # 40フレーム持続
+            self.active_timer = 40 # Lasts 40 frames
             self.player_ref = player
             player.vy = -5
             return True
         return False
+
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
         
         p = player if player else self.player_ref
         if self.active_timer > 0 and p:
             self.active_timer -= 1
-            # 速度を固定＆無敵を付与
+            # Fix speed and grant invincibility
             p.vx = 20 * p.facing
             p.invincible_timer = max(p.invincible_timer, 2)
-            # 3フレームに1回炎を落とす
+            # Drop fire every 3 frames
             if self.active_timer % 3 == 0:
                 self.flames.append([p.x, p.y, 75, p.facing])
+
                 
         for f in self.flames[:]:
             f[2] -= 1
@@ -1055,24 +1111,26 @@ class MeteorSkill(Skill):
         if self.meteor:
             m = self.meteor
             m[1] += m[2]
-            if m[1] >= ground: # 着弾
+            if m[1] >= ground: # Impact
                 if enemies:
-                    # 攻撃範囲を2倍に (300 -> 600)
+                    # Double attack range (300 -> 600)
                     blast_rect = pygame.Rect(m[0] - 300, ground - 100, 600, 100)
                     for e in enemies:
                         if e.hp > 0 and blast_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            # 衝撃波の向き
+                            # Shockwave direction
                             sf = 1 if e.x > m[0] else -1
                             e.take_damage(12 + self.damage_bonus, sf, element='fire')
-                            e.burn_timer = 180 # やけど付与
+                            e.burn_timer = 180 # Inflict burn
                 self.meteor = None
+
     def draw_effect(self, screen):
         if self.meteor:
             m = self.meteor
-            pygame.draw.circle(screen, (255, 100, 0), (int(m[0]), int(m[1])), 80) # 少し大きく
-            pygame.draw.circle(screen, (255, 200, 50), (int(m[0]), int(m[1])), 50) # 少し大きく
-            # 範囲表示を600幅に
+            pygame.draw.circle(screen, (255, 100, 0), (int(m[0]), int(m[1])), 80) # Slightly larger
+            pygame.draw.circle(screen, (255, 200, 50), (int(m[0]), int(m[1])), 50) # Slightly larger
+            # Range display set to 600 width
             pygame.draw.ellipse(screen, (255, 0, 0), (int(m[0]) - 300, ground - 20, 600, 40), 2)
+
         
 class Warrior(Character):
     def __init__(self, player):
@@ -1087,26 +1145,30 @@ class Warrior(Character):
         self.hit_enemies = []
 
     def get_max_hp(self):
-        return 15 # HP高い
+        return 15 # High HP
     def get_speed(self):
-        return 0.8 # 足遅い
+        return 0.8 # Slow move speed
     def get_jump_power(self):
-        return -12 # ジャンプ低い
+        return -12 # Low jump power
+
 
     def attack(self, enemies):
         if self.hammering == 0:
-            self.hammering = 20 # 打撃の振り下ろしフレーム（15から10へ高速化）
+            self.hammering = 20 # Swing duration frames (fastened from 15 to 10)
             self.hit_enemies = []
 
+
     def handle_event(self, event, enemies):
-        """戦士の入力イベント処理（基本攻撃とスキルの個別発動）"""
+        """Warrior input handling (basic attack and skills)"""
         super().handle_event(event, enemies)
+
         if event.type == pygame.KEYDOWN:
             if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
                 self.player.vy = self.player.jump_power
                 self.player.jumpcount -= 1
-            # 固有スキルの個別発動（キー設定から取得）- 通常モードのみ
+            # Individual skill activation (from key config) - Normal mode only
             if not self.is_reincarnator_mode:
+
                 if event.key == key_config['skill_1']: self.skill_throw.activate(self.player, enemies)
                 if event.key == key_config['skill_2']: self.skill_armor.activate(self.player, enemies)
                 if event.key == key_config['skill_3']: self.skill_brave_charge.activate(self.player, enemies)
@@ -1117,24 +1179,27 @@ class Warrior(Character):
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
         
-        # ハンマーの当たり判定処理
+        # Hammer collision detection
         if self.hammering > 0:
             self.hammering -= 1
-            if self.hammering < 6: # 10フレーム中、後半の6フレームで判定発生
+            if self.hammering < 6: # Collison active in the last 6 frames of attack
                 hx = self.player.x + (60 * self.player.facing)
+
                 hy = self.player.y + 20
                 if enemies:
                     hammer_rect = pygame.Rect(hx - 50, hy - 50, 100, 100)
                     for e in enemies:
                         if e.hp > 0 and e not in self.hit_enemies and hammer_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            if e.take_damage(4 * self.player.damage_multiplier, self.player.facing, knockback_x=12, knockback_y=-8, element='heavy'): # 高威力, 大きく吹き飛ばし
+                            if e.take_damage(4 * self.player.damage_multiplier, self.player.facing, knockback_x=12, knockback_y=-8, element='heavy'): # High damage, large knockback
                                 self.hit_enemies.append(e)
+
 
     def draw_effects(self, screen):
         super().draw_effects(screen)
         
-        # ハンマーの描画 (かっこよく)
+        # Hammer rendering (stylized)
         if self.hammering > 0:
+
             p_center_x = self.player.x + 20
             p_center_y = self.player.y + 20
             progress = (20 - self.hammering) / 20.0
@@ -1145,8 +1210,9 @@ class Warrior(Character):
             end_x = p_center_x + dist * math.cos(rad)
             end_y = p_center_y + dist * math.sin(rad)
             
-            # 残像
+            # Afterimage
             for i in range(3):
+
                 alpha_progress = max(0, progress - i * 0.05)
                 alpha_angle = base_angle + (-110 + 180 * alpha_progress) * self.player.facing
                 a_rad = math.radians(alpha_angle)
@@ -1163,8 +1229,9 @@ class Warrior(Character):
 
 
 class Pyromancer(Character):
-    """炎の魔術師：遠距離からの火球攻撃と、広範囲の炎スキルを得意とする"""
+    """Fire Mage: Specializes in long-range fireballs and wide-area fire skills"""
     def __init__(self, player):
+
         super().__init__(player)
         self.skill_lava = LavaSkill(15, 15)
         self.skill_enhanced = EnhancedFireSkill(75, 15)
@@ -1172,18 +1239,20 @@ class Pyromancer(Character):
         self.skill_flamedash = FlameDashSkill(195, 15)
         self.skill_meteor = MeteorSkill(255, 15)
         self.skills = [self.skill_lava, self.skill_enhanced, self.skill_eruption, self.skill_flamedash, self.skill_meteor]
-        self.fireballs = [] # 現在画面上にある通常攻撃の火球
+        self.fireballs = [] # [Translated/Cleaned Comment]
 
     def get_max_hp(self):
-        return 7 # 低耐久
+        return 7 # Low durability
+
     def get_speed(self):
         return 1.1
     def get_jump_power(self):
         return -14
 
     def attack(self, enemies):
-        # 通常攻撃：ファイアボール
+        # Basic attack: Fireball
         vx = 20 * self.player.facing
+
         self.fireballs.append([self.player.x + 20, self.player.y + 20, vx, 40, self.player.facing]) # Add player.facing
 
     def handle_event(self, event, enemies):
@@ -1202,8 +1271,9 @@ class Pyromancer(Character):
 
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
-        # 火の玉の更新
+        # Update fireballs
         for fb in self.fireballs[:]:
+
             fb[0] += fb[2]
             fb[3] -= 1
             hit = False
@@ -1213,10 +1283,11 @@ class Pyromancer(Character):
                         if e.take_damage(1, fb[4], element='fire'): # Use fireball's facing
                             hit = True
                             break
+
             if hit or fb[3] <= 0:
                 self.fireballs.remove(fb)
                 
-        # FlameDashの軌跡追加
+        # [Translated/Cleaned Comment]
         if self.skill_flamedash.flames and len(self.skill_flamedash.flames) > 0:
             if abs(self.player.vx) > 5 and self.player.invincible_timer > 0:
                 if random.random() < 0.5:
@@ -1234,7 +1305,8 @@ class JavelinThrowSkill(Skill):
         self.javelins = []
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            vx = 35 * player.facing # 高速
+            vx = 35 * player.facing # High speed
+
             self.javelins.append([player.x + 20, player.y + 20, vx, 40, [], player.facing])
             return True
         return False
@@ -1247,7 +1319,8 @@ class JavelinThrowSkill(Skill):
                 er_rect = pygame.Rect(j[0], j[1] - 5, 40, 10)
                 for e in enemies:
                     if e.hp > 0 and e not in j[4] and er_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                        if e.take_damage(4 + self.damage_bonus, j[5]): # 貫通
+                        if e.take_damage(4 + self.damage_bonus, j[5]): # Piercing
+
                             j[4].append(e)
             if j[3] <= 0:
                 self.javelins.remove(j)
@@ -1265,20 +1338,23 @@ class VaultingStrikeSkill(Skill):
         if super().activate(player, enemies):
             self.player_ref = player
             self.source_facing = player.facing
-            player.vy = -20 # 斜めジャンプ
+            player.vy = -20 # Diagonal jump
             player.invincible_timer = 20
-            self.active_timer = 30 # 空中での受付時間
+            self.active_timer = 30 # Air active time
             self.player_ref = player
             self.source_facing = player.facing
+
             return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
         if self.active_timer > 0:
             self.active_timer -= 1
-            if self.player_ref.y >= ground - 10: # 着地時
+            if self.player_ref.y >= ground - 10: # On landing
+
                 self.active_timer = 0
-                if enemies: # 衝撃波
+                if enemies: # Shockwave
+
                     blast = pygame.Rect(self.player_ref.x - 40, self.player_ref.y, 120, 40)
                     for e in enemies:
                         if e.hp > 0 and blast.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
@@ -1295,7 +1371,8 @@ class RapidThrustsSkill(Skill):
         self.source_facing = 0
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            self.active_timer = 60 # 1秒間連撃
+            self.active_timer = 60 # 1 second multi-thrust
+
             self.player_ref = player
             self.source_facing = player.facing
             return True
@@ -1306,14 +1383,17 @@ class RapidThrustsSkill(Skill):
             self.active_timer -= 1
             if self.player_ref:
                 self.player_ref.vx = 0 
-            if self.active_timer % 6 == 0: # ヒット間隔を短く(10->6)
+            if self.active_timer % 6 == 0: # Shortened hit interval (10->6)
+
                 if enemies and self.player_ref:
                     hx = self.player_ref.x + (20 if self.player_ref.facing == 1 else -160)
-                    hitbox = pygame.Rect(hx, self.player_ref.y + 10, 180, 30) # 当たり判定拡大
+                    hitbox = pygame.Rect(hx, self.player_ref.y + 10, 180, 30) # Expanded hitbox
+
                     for e in enemies:
                         if e.hp > 0 and hitbox.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                             e.take_damage(1 + self.damage_bonus, self.source_facing)
-                            # 吸い込み効果
+                            # Pulling effect
+
                             pull_x = self.player_ref.x + 60 * self.player_ref.facing
                             e.x += (pull_x - e.x) * 0.2
     def draw_effect(self, screen):
@@ -1371,12 +1451,16 @@ class DragonDiveSkill(Skill):
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
         if self.phase == 1:
-            self.player_ref.vx = 0 # 真上に上がる
-            if self.player_ref.vy > -5: # 上昇終了間近
+            self.player_ref.vx = 0 # Rising straight up
+
+            if self.player_ref.vy > -5: # Near end of ascent
+
                 self.phase = 2
-                self.player_ref.vy = 50 # ダイブ速度
+                self.player_ref.vy = 50 # Dive speed
+
         elif self.phase == 2:
-            # 急降下中に左右操作可能
+            # Left/right control during dive
+
             keys = pygame.key.get_pressed()
             move_speed = 10
             if keys[key_config['move_left']]:
@@ -1387,7 +1471,8 @@ class DragonDiveSkill(Skill):
             if self.player_ref.y >= ground:
                 self.phase = 0
                 if enemies:
-                    # 地面衝突時に周囲にダメージ
+                    # Damage surrounding area on ground impact
+
                     blast = pygame.Rect(self.player_ref.x - 120, self.player_ref.y - 60, 280, 110)
                     for e in enemies:
                         if e.hp > 0 and blast.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
@@ -1398,8 +1483,9 @@ class DragonDiveSkill(Skill):
             pygame.draw.polygon(screen, (50, 200, 200), [(self.player_ref.x+20, self.player_ref.y-20), (self.player_ref.x+50, self.player_ref.y+50), (self.player_ref.x-10, self.player_ref.y+50)])
 
 class Lancer(Character):
-    """槍使い：中距離からの強力な突き攻撃と、機動力を活かしたスキルを持つ"""
+    """Lancer: Mid-range powerful thrust attacks and mobility-focused skills"""
     def __init__(self, player):
+
         super().__init__(player)
         self.skill_javelin = JavelinThrowSkill(15, 15)
         self.skill_vault = VaultingStrikeSkill(75, 15)
@@ -1407,8 +1493,9 @@ class Lancer(Character):
         self.skill_sweep = SweepingStrikeSkill(195, 15)
         self.skill_dragondive = DragonDiveSkill(255, 15)
         self.skills = [self.skill_javelin, self.skill_vault, self.skill_rapid, self.skill_sweep, self.skill_dragondive]
-        self.thrusting = 0 # 突き攻撃の持続タイマー
+        self.thrusting = 0 # Thrust duration timer
         self.hit_enemies = []
+
 
     def get_max_hp(self):
         return 12
@@ -1419,8 +1506,9 @@ class Lancer(Character):
 
     def attack(self, enemies):
         if self.thrusting == 0:
-            self.thrusting = 15 # 高速突き
+            self.thrusting = 15 # High-speed thrust
             self.hit_enemies = []
+
 
     def handle_event(self, event, enemies):
         super().handle_event(event, enemies)
@@ -1439,42 +1527,47 @@ class Lancer(Character):
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
         
-        # 槍突きの判定
+        # Spear thrust collision
         if self.thrusting > 0:
             self.thrusting -= 1
-            if self.thrusting == 10: # 発生フレーム
+            if self.thrusting == 10: # Active frame
+
                 hx = self.player.x + (20 if self.player.facing == 1 else -140)
                 hy = self.player.y + 20
                 if enemies:
-                    spear_rect = pygame.Rect(hx, hy - 5, 160, 10) # 非常に長い
+                    spear_rect = pygame.Rect(hx, hy - 5, 160, 10) # Very long hitbox
                     for e in enemies:
                         if e.hp > 0 and e not in self.hit_enemies and spear_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            if e.take_damage(2, self.player.facing, knockback_x=4): # 軽くノックバック
+                            if e.take_damage(2, self.player.facing, knockback_x=4): # Light knockback
                                 self.hit_enemies.append(e)
+
 
     def draw_effects(self, screen):
         super().draw_effects(screen)
         
-        # 槍攻撃の描画 (かっこよく)
+        # Spear attack rendering (stylized)
         if self.thrusting > 0:
+
             px = self.player.x + 20
             py = self.player.y + 20
             progress = (15 - self.thrusting) / 15.0
-            reach = 180 * math.sin(progress * math.pi) # 突き出して戻る
+            reach = 180 * math.sin(progress * math.pi) # [Translated/Cleaned Comment]
             
-            # 白い残像ライン
+            # [Translated/Cleaned Comment]
             pygame.draw.line(screen, (255, 255, 255), (px, py), (px + (reach + 20) * self.player.facing, py), 6)
             pygame.draw.line(screen, (100, 200, 255), (px, py), (px + reach * self.player.facing, py), 12)
             
-            # 穂先のフラッシュ
+            # Tip flash
+
             if 5 < self.thrusting < 12:
                 flash_surf = pygame.Surface((60, 20), pygame.SRCALPHA)
                 pygame.draw.ellipse(flash_surf, (255, 255, 255, 180), (0, 0, 60, 20))
                 screen.blit(flash_surf, (px + (reach - 30) * self.player.facing if self.player.facing == 1 else px - reach - 30, py - 10))
 
 class Swordsman(Character):
-    """剣士：最も標準的なキャラクター。近接攻撃と移動スキルのバランスが良い"""
+    """Swordsman: Standard character. Good balance of melee and mobility skills."""
     def __init__(self, player):
+
         super().__init__(player)
         self.skill_dash_strike = DashStrikeSkill(15, 15)
         self.skill_rising_strike = RisingStrikeSkill(75, 15)
@@ -1500,17 +1593,19 @@ class Swordsman(Character):
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
             
-        # 固有スキルの更新（重力などプレイヤー全体に影響するもの）
+        # Update unique skills (global effects like gravity)
         if self.skill_gravity in self.skills and self.skill_gravity.range > 0:
-            # Player.update側で重力軽減が処理されているが、ここでも補足可能
+            # Gravity reduction is handled in Player.update, but can be supplemented here
             pass
+
 
     def draw_effects(self, screen):
         super().draw_effects(screen)
 
 class Archer(Character):
-    """弓兵：遠距離攻撃に特化。配置型のボムや、軌道を操る矢のスキルを持つ"""
+    """Archer: Long-range specialist. Uses bombs and trajectory-altering arrow skills."""
     def __init__(self, player):
+
         super().__init__(player)
         self.skill_pierce = PiercingArrowSkill(15, 15)
         self.skill_mirror = MirrorSkill(75, 15)
@@ -1518,7 +1613,8 @@ class Archer(Character):
         self.skill_rain = ArrowRainSkill(195, 15)
         self.skill_pin = PinningArrowSkill(255, 15)
         self.skills = [self.skill_pierce, self.skill_mirror, self.skill_warp, self.skill_rain, self.skill_pin]
-        self.bombs = [] # 画面上に置かれたボムのリスト
+        self.bombs = [] # List of active bombs
+
 
     def get_max_hp(self):
         return 10
@@ -1528,19 +1624,22 @@ class Archer(Character):
         return -15
 
     def attack(self, enemies):
-        # ボム攻撃 (クールタイムなしだが同時存在数制限など設けても良い)
+        # Bomb attack (no cooldown, but can be limited by number of active bombs)
         bx = self.player.x + 60 * self.player.facing
         by = self.player.y + 20
-        self.bombs.append([bx, by, 15, self.player.facing]) # 15フレームの爆発
+        self.bombs.append([bx, by, 15, self.player.facing]) # 15 frame explosion
+
 
     def handle_event(self, event, enemies):
         super().handle_event(event, enemies)
         if event.type == pygame.KEYDOWN:
-            # PiercingArrowのエイム中処理（スキルを所持している場合）
+            # Handling PiercingArrow aim (if owned)
             pierce_skill = next((s for s in self.skills if isinstance(s, PiercingArrowSkill)), None)
+
             if pierce_skill and pierce_skill.aiming:
                 if event.key == key_config['skill_1']: 
-                    pierce_skill.activate(self.player, enemies) # 発射
+                    pierce_skill.activate(self.player, enemies) # Fire
+
                 elif event.key == key_config['jump']:
                     pierce_skill.aim_angle -= 15 * self.player.facing
                 elif event.key == pygame.K_DOWN or event.key == pygame.K_s:
@@ -1560,32 +1659,34 @@ class Archer(Character):
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
         
-        # ボムの更新と爆発判定
+        # Update bombs and check for explosions
         for b in self.bombs[:]:
-            b[2] -= 1 # タイマー減少
+            b[2] -= 1 # Countdown timer
             if b[2] <= 0:
-                # 爆発
+                # Explosion
                 if enemies:
                     blast_rect = pygame.Rect(b[0] - 60, b[1] - 40, 120, 80)
                     for e in enemies:
                         if e.hp > 0 and blast_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            e.take_damage(4, b[3], element='fire') # ダメージ調整
+                            e.take_damage(4, b[3], element='fire') # Damage adjustment
                 self.bombs.remove(b)
+
 
     def draw_effects(self, screen):
         super().draw_effects(screen)
-        # ボムと爆発の描画
+        # Render bombs and explosions
         for b in self.bombs:
-            if b[2] > 5: # 設置中
-                pygame.draw.circle(screen, (30, 30, 30), (int(b[0]), int(b[1])), 10) # 色を濃く
+            if b[2] > 5: # Placed
+                pygame.draw.circle(screen, (30, 30, 30), (int(b[0]), int(b[1])), 10) # Darken color
                 pygame.draw.circle(screen, (255, 50, 50), (int(b[0]), int(b[1])), 5)
-            else: # 爆発
-                # 爆発エフェクトを派手に
+            else: # Explosion
+                # Fancy explosion effect
                 radius = 60 - b[2]*4
                 alpha = 150 + b[2]*10
                 surf = pygame.Surface((radius*2, radius*2), pygame.SRCALPHA)
                 pygame.draw.circle(surf, (255, 150, 50, alpha), (radius, radius), radius)
                 screen.blit(surf, (int(b[0]-radius), int(b[1]-radius)))
+
 
 class MagicSwordsman(Character):
     def __init__(self, player):
@@ -1599,10 +1700,11 @@ class MagicSwordsman(Character):
 
     def attack(self, enemies):
         self.player.swording = 12
-        # MagicSword発動中なら魔法波を射出
+        # Launch wave if MagicSword is active
         ms_skill = next((s for s in self.skills if isinstance(s, MagicSwordSkill)), None)
         if ms_skill and ms_skill.active_timer > 0:
             ms_skill.launch_wave(self.player)
+
 
     def handle_event(self, event, enemies):
         super().handle_event(event, enemies)
@@ -1619,7 +1721,7 @@ class MagicSwordsman(Character):
 
 
     def on_sword_hit(self, enemy, source_facing):
-        # 基底クラスのon_sword_hit（self.skillsリストからエンチャントを汎用検出）
+        # [Translated/Cleaned Comment]
         super().on_sword_hit(enemy, source_facing)
             
     def update(self, keys, enemies, cooldown_speed):
@@ -1629,9 +1731,9 @@ class MagicSwordsman(Character):
         super().draw_effects(screen)
 
 
-# --- 怪物β スキル定義 ---
+# [Translated/Cleaned Comment]
 class PounceSkill(Skill):
-    """飛びかかり: ダッシュ攻撃。暴走中はHP吸収"""
+    """     :            HP  """
     def __init__(self, x, y):
         super().__init__(x, y, 90, (200, 50, 50), (100, 25, 25))
         self.dashing = 0
@@ -1660,14 +1762,14 @@ class PounceSkill(Skill):
                             if e.take_damage(int(dmg), self.dash_dir, knockback_x=8, knockback_y=-5):
                                 self.hit_enemies.append(e)
                                 if getattr(player, '_monster_rampage', 0) > 0:
-                                    # ▼調整用: 暴走中ダッシュ攻撃の回復量
+                                    # [Translated/Cleaned Comment]
                                     heal_amount = 1
                                     player.hp = min(player.max_hp, player.hp + heal_amount)
     def draw_effect(self, screen):
         pass
 
 class ScaleProjectileSkill(Skill):
-    """鱗赫: 飛び道具。暴走中は貫通"""
+    """  :            """
     def __init__(self, x, y):
         super().__init__(x, y, 45, (150, 80, 80), (75, 40, 40))
         self.projectiles = []
@@ -1711,7 +1813,7 @@ class ScaleProjectileSkill(Skill):
             ])
 
 class RoarSkill(Skill):
-    """咆哮: 周囲にスタン + 小ダメージ"""
+    """  :        +      """
     def __init__(self, x, y):
         super().__init__(x, y, 180, (180, 130, 50), (90, 65, 25))
         self.roar_effect = 0
@@ -1746,16 +1848,16 @@ class RoarSkill(Skill):
                 screen.blit(surf, (int(px)-r-1, int(py)-r-1))
 
 class AmpuleSkill(Skill):
-    """アンプル投与: 自傷 + バフスタック"""
+    """      :    +       """
     def __init__(self, x, y):
         super().__init__(x, y, 120, (100, 200, 100), (50, 100, 50))
     def activate(self, player, enemies=None):
-        # 残りHPが1以下の場合は自傷できないため発動不可
+        # [Translated/Cleaned Comment]
         if player.hp <= 1:
             return False
             
         if super().activate(player, enemies):
-            # ▼調整用: アンプル投与時の自傷ダメージ量（現在は最大HPの10%、最低1）
+            # [Translated/Cleaned Comment]
             self_dmg = max(1, player.max_hp // 10)
             
             player.hp -= self_dmg
@@ -1765,7 +1867,7 @@ class AmpuleSkill(Skill):
         return False
 
 class RampageSkill(Skill):
-    """暴走: アンプル数に応じて全ステ強化"""
+    """  :               """
     def __init__(self, x, y):
         super().__init__(x, y, 300, (200, 30, 30), (100, 15, 15))
         self.active_timer = 0
@@ -1773,7 +1875,7 @@ class RampageSkill(Skill):
         if super().activate(player, enemies):
             amps = getattr(player, '_ampule_count', 0)
             
-            # ▼調整用: 暴走の持続時間（1秒＝60フレーム。基本180 + アンプル数×30）
+            # [Translated/Cleaned Comment]
             base_duration = 180
             duration_per_ampule = 30
             self.active_timer = base_duration + amps * duration_per_ampule
@@ -1781,7 +1883,7 @@ class RampageSkill(Skill):
             
             player._monster_rampage = self.active_timer
             
-            # 暴走発動時にアンプルを半分消費する（切り捨て）
+            # [Translated/Cleaned Comment]
             player._ampule_count = amps // 2
             return True
         return False
@@ -1796,22 +1898,22 @@ class RampageSkill(Skill):
 
 class MonsterBeta(Character):
     """
-    怪物β: アンプル（自己強化アイテム）と暴走状態を組み合わせて戦う特殊な獣型キャラクター。
+       :                                         
     """
     def __init__(self, player):
         super().__init__(player)
-        # スキルの初期化（アイコン位置を指定）
+        # [Translated/Cleaned Comment]
         self.skill_pounce = PounceSkill(15, 15)
         self.skill_scale = ScaleProjectileSkill(75, 15)
         self.skill_roar = RoarSkill(135, 15)
         self.skill_ampule = AmpuleSkill(195, 15)
         self.skill_rampage = RampageSkill(255, 15)
-        # 基底クラスの所持リストに登録
+        # [Translated/Cleaned Comment]
         self.skills = [self.skill_pounce, self.skill_scale, self.skill_roar, self.skill_ampule, self.skill_rampage]
-        self.scratch_timer = 0  # 近接攻撃の持続タイマー
-        self.hit_enemies = []   # 1回の攻撃でヒット済みの敵リスト
-        player._ampule_count = 0     # アンプルの所持数（プレイヤー変数に保持）
-        player._monster_rampage = 0  # 暴走タイマー
+        self.scratch_timer = 0  # [Translated/Cleaned Comment]
+        self.hit_enemies = []   # [Translated/Cleaned Comment]
+        player._ampule_count = 0     # [Translated/Cleaned Comment]
+        player._monster_rampage = 0  # [Translated/Cleaned Comment]
 
     def get_max_hp(self): return 12
     def get_speed(self): return 1.5
@@ -1886,18 +1988,18 @@ class MonsterBeta(Character):
                     (cx + 15 * p.facing, cy + offset + 10), 3)
         
         if rampage > 0:
-            # プレイヤー自体を赤く染める
+            # [Translated/Cleaned Comment]
             shade = pygame.Surface((p.width, p.height), pygame.SRCALPHA)
             shade.fill((200, 0, 0, 120))
             screen.blit(shade, (int(p.x), int(p.y)))
             
-            # 光る赤い目
+            # [Translated/Cleaned Comment]
             eye_y = int(p.y + 12)
             eye_x = int(p.x + p.width/2 + 10 * p.facing)
             pygame.draw.circle(screen, (255, 0, 0), (eye_x, eye_y), 5)
             pygame.draw.circle(screen, (255, 255, 100), (eye_x, eye_y), 2)
             
-            # 荒々しいオーラ
+            # [Translated/Cleaned Comment]
             pulse = abs(math.sin(pygame.time.get_ticks() * 0.015)) * 50
             aura_surf = pygame.Surface((100, 100), pygame.SRCALPHA)
             aura_color = (200 + int(pulse), 20, 20, 60 + int(pulse))
@@ -1905,7 +2007,7 @@ class MonsterBeta(Character):
             screen.blit(aura_surf, (int(p.x - 30), int(p.y - 30)))
         
         if amps > 0:
-            # アンプル数アイコン表示
+            # [Translated/Cleaned Comment]
             icon_w = 4
             icon_h = 10
             spacing = 2
@@ -1919,16 +2021,17 @@ class MonsterBeta(Character):
                 start_y = int(p.y - 15 - row * (icon_h + 3))
                 
                 ix = start_x + col * (icon_w + spacing)
-                # 緑色のアンプル
+                # Green ampule
                 pygame.draw.rect(screen, (50, 220, 50), (ix, start_y, icon_w, icon_h))
-                # アンプルのフタ（白）
+                # Ampule cap (white)
                 pygame.draw.rect(screen, (255, 255, 255), (ix, start_y, icon_w, 2))
 
-# --- プレイヤー クラス定義 ---
+# --- Player Class Definition ---
 class Player:
     """
-    プレイヤーの物理挙動、描画、キャラクター（クラス）の管理を行う。
+    Manages player physics, rendering, and character class instance.
     """
+
     def __init__(self):
         self.x, self.y = 400, 350
         self.width, self.height = 40, 40
@@ -1940,20 +2043,22 @@ class Player:
         self.jump_count_max = 2
         self.jumpcount = 2
         self.facing = 1
-        self.swording = 0             # 短距離攻撃（剣）の持続タイマー
+        self.swording = 0             # Melee attack (sword) duration timer
         self.sword_length = 120
         self.hp = 10
         self.max_hp = 10
         self.defense = 0
-        self.bonus_damage = 0         # アップグレードによる追加ダメージ
-        self.cooldown_speed_mult = 1.0 # クールタイム短縮倍率
-        self.hit_timer = 0            # 被弾時のノックバック/点滅タイマー
-        self.prev_touch_up = False    # スマホモード向けジャンプ入力追跡用
+        self.bonus_damage = 0         # Additional damage from upgrades
+        self.cooldown_speed_mult = 1.0 # Cooldown reduction multiplier
+        self.hit_timer = 0            # Hit knockback/flashing timer
+        self.prev_touch_up = False    # Jump input tracking for smartphone mode
 
 
-        self.character = None         # 現在使用中のキャラクタークラスのインスタンス
-        self.invincible_timer = 0     # 無敵タイマー
-        self.reincarnator_mode = False # キャラ選択時の設定保持用
+
+        self.character = None         # Active character class instance
+        self.invincible_timer = 0     # Invincibility timer
+        self.reincarnator_mode = False # Stores Reincarnator mode setting
+
         self.skill_m = MirrorSkill(15, 15)
         self.skill_g = GravitySkill(75, 15)
         self.skill_i = IceSkill(135, 15)
@@ -2018,7 +2123,8 @@ class Player:
         self.vx += self.ax
         self.vx *= self.friction
         
-        # 重力スキルのチェック
+        # Gravity skill check
+
         gravity_active = False
         if self.character:
             for s in self.character.skills:
@@ -2030,17 +2136,20 @@ class Player:
 
         current_ay = 0.3 if gravity_active else 0.8
         
-        # ジャンプ入力判定 (物理キー or スマホ上ボタン)
+        # Jump input detection (keys or smartphone button)
+
         jump_input = keys[key_config['jump']] or (smartphone_mode and touch_keys['up'])
         
-        # スマホモード用の離散ジャンプ判定
+        # Discrete jump detection for smartphone
+
         touch_jump_triggered = False
         if smartphone_mode:
             if touch_keys['up'] and not self.prev_touch_up:
                 touch_jump_triggered = True
             self.prev_touch_up = touch_keys['up']
 
-        # ジャンプ挙動
+        # Jump behavior
+
         if touch_jump_triggered and (self.y >= ground - 45 or self.jumpcount > 0):
             self.vy = self.jump_power
             self.jumpcount -= 1
@@ -2051,7 +2160,8 @@ class Player:
         self.x += self.vx
         self.y += self.vy
 
-        # スキルアップデート
+        # Skill updates
+
         cooldown_speed = 1.0 * self.cooldown_speed_mult
         if self.character:
             self.character.update(keys, enemies, cooldown_speed)
@@ -2059,7 +2169,8 @@ class Player:
         if game_state == STATE_LOBBY:
             for s in self.skills: s.update(enemies)
 
-        # ダッシュスキルのチェック
+        # Dash skill check
+
         dash_active = False
         if self.character:
             for s in self.character.skills:
@@ -2077,8 +2188,9 @@ class Player:
             self.vy = 0
             self.jumpcount = self.jump_count_max
 
-        # 一方通行足場判定 (下からはすり抜けられる)
-        if self.vy > 0:  # 落下中のみ
+        # One-way platform detection (passable from below)
+        if self.vy > 0:  # Only while falling
+
             foot_y = self.y + self.height
             prev_foot_y = foot_y - self.vy
             if prev_foot_y <= PLATFORM_Y and foot_y >= PLATFORM_Y:
@@ -2092,7 +2204,8 @@ class Player:
             if self.x <= 10: self.x = 10
             if self.x >= width - 40: self.x = width - 40
 
-        # スマホモードの攻撃判定
+        # Smartphone attack detection
+
         if smartphone_mode and touch_keys['attack'] and self.swording <= 0:
             if self.character:
                 self.character.attack(enemies)
@@ -2164,13 +2277,13 @@ class Player:
     def take_damage(self, amount, source_facing=1):
         if self.invincible_timer > 0: return False
         if self.hit_timer == 0:
-            amount = max(0, amount - self.defense) # 防御力で軽減 (0ダメージも許容)
+            amount = max(0, amount - self.defense) # Reduce by defense (0 damage allowed)
             if amount <= 0:
-                self.hit_timer = 10 # 短い無敵で連続判定防止
-                return False # ダメージ0なのでノーダメ
+                self.hit_timer = 10 # Short invincibility prevents multiple hits
+                return False # 0 damage so no damage
             self.hp -= amount
             self.hit_timer = 40
-            self.vx = source_facing * 10 # ノックバック
+            self.vx = source_facing * 10 # Knockback
             return True
         return False
 
@@ -2183,7 +2296,7 @@ class EnemyBullet:
         self.vy = math.sin(angle) * self.speed
         self.width = 15
         self.height = 15
-        self.timer = 180 # 3秒で消滅
+        self.timer = 180 # Expires in 3 seconds
         self.damage = damage
 
     def update(self, player):
@@ -2191,10 +2304,12 @@ class EnemyBullet:
         self.y += self.vy
         self.timer -= 1
         
-        # 当たり判定
+        # Collision detection
+
         if player.x <= self.x <= player.x + 40 and player.y <= self.y <= player.y + 40:
             if player.take_damage(self.damage, 1 if self.vx > 0 else -1):
-                return True # 当たった
+                return True # Hit
+
         return False
 
     def draw(self, screen):
@@ -2222,21 +2337,24 @@ class Enemy:
         if self.spawn_timer > 0:
             self.spawn_timer -= 1
             if self.spawn_timer == 0 and self.enemy_type != 'pink':
-                self.y = ground - self.height # 地面に揃える
+                self.y = ground - self.height # Align to ground
             return
             
         if self.hit_timer > 0: self.hit_timer -= 1
         
-        # 状態異常の更新
+        # Status effect updates
+
         if self.frozen_timer > 0:
             self.frozen_timer -= 1
-            # 凍結中は物理と行動をスキップ
+            # Skip physics and behavior while frozen
+
             if self.y < ground - self.height: self.vy += 1
             self.y += self.vy
             self.x += self.vx
             self.vx *= 0.9
             if self.y > ground - self.height: self.y = ground - self.height; self.vy = 0
-            # 画面外への脱走を防止
+            # Prevent screen escape
+
             if self.x < 0:
                 self.x = 0
                 self.vx *= -0.5
@@ -2247,19 +2365,22 @@ class Enemy:
 
         if self.burn_timer > 0:
             self.burn_timer -= 1
-            if self.burn_timer % 60 == 0: # 1秒ごとにダメージ
+            if self.burn_timer % 60 == 0: # Damage every second
+
                 self.take_damage(1, status_effect=True)
 
         if self.attack_cooldown > 0: self.attack_cooldown -= 1
         
-        # READY中は動かない、ダメージも与えない
+        # Do not move or deal damage during READY state
+
         if wave_start_wait_timer > 0:
             return
 
         self._update_physics()
         if self.hp > 0: self._update_behavior(player)
         
-        # 画面外への脱走を防止 (共通処理)
+        # Prevent screen escape (common)
+
         if self.x < 0:
             self.x = 0
             self.vx *= -0.5
@@ -2276,7 +2397,8 @@ class Enemy:
     def _update_physics(self):
         if self.y < ground - self.height: 
             self.vy += 1
-        elif self.vy > 0: # 落下中のみ速度0にして接地させる
+        elif self.vy > 0: # Align to ground when falling
+
             self.vy = 0
             self.y = ground - self.height
         
@@ -2284,7 +2406,8 @@ class Enemy:
         self.x += self.vx
         self.vx *= 0.9
         
-        # 一方通行足場判定 (地上敵のみ)
+        # One-way platform detection (ground enemies only)
+
         if self.enemy_type != 'pink' and self.vy > 0:
             foot_y = self.y + self.height
             prev_foot_y = foot_y - self.vy
@@ -2299,7 +2422,8 @@ class Enemy:
     def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None):
         if self.hp <= 0: return False
         
-        # 属性シナジー
+        # Elemental synergy
+
         if self.frozen_timer > 0:
             if element == 'fire':
                 self.frozen_timer = 0
@@ -2318,7 +2442,8 @@ class Enemy:
         if self.hit_timer > 0: return False
         
         if self.frozen_timer > 0:
-            # 凍結中はノックバックしない
+            # Skip knockback while frozen
+
             knockback_x = 0
             knockback_y = 0
             
@@ -2368,7 +2493,8 @@ class Enemy:
             return
             
         if self.spawn_timer > 0:
-            # 召喚エフェクト
+            # Summoning effect
+
             radius = int((60 - self.spawn_timer % 60) * 0.5)
             pygame.draw.ellipse(screen, (255, 255, 100), (self.x - 20, ground - 10, self.width + 40, 20), 2)
             if radius >= 1:
@@ -2379,14 +2505,16 @@ class Enemy:
         if self.hit_timer > 0:
             draw_color = (255, 255, 255)
         elif self.frozen_timer > 0:
-            draw_color = (150, 200, 255) # 凍結中は青白く
+            draw_color = (150, 200, 255) # Pale blue while frozen
+
         elif self.burn_timer > 0:
             if (self.burn_timer // 10) % 2 == 0:
                 draw_color = (255, 100, 0)
         
         pygame.draw.rect(screen, draw_color, (int(self.x), int(self.y), self.width, self.height))
         
-        # 炎エフェクト
+        # Flame effect
+
         if self.burn_timer > 0:
             for _ in range(3):
                 fx = self.x + random.randint(0, self.width)
@@ -2400,44 +2528,51 @@ class RedEnemy(Enemy):
         super().__init__(x, y, hp, (255, 0, 0), 'red', attack_damage)
 
     def _update_physics(self):
-        # 地面固定
+        # Align to ground
         self.vy = 0
         self.y = ground - self.height
         self.x += self.vx
-        self.vx *= 0.92 # ユーザー調整済み
+        self.vx *= 0.92 # User-adjusted
+
         
-        # 画面外への脱走を防止
+        # Prevent screen escaping
         if self.x < 0:
             self.x = 0
             self.vx *= -0.5
         elif self.x > width - self.width:
             self.x = width - self.width
             self.vx *= -0.5
+
     def _update_behavior(self, player):
-        # 左右のパトロール挙動 (画面端で反転)
+        # Left/right patrol (flip at screen edge)
         if self.x <= 0:
             self.facing = 1
         elif self.x >= width - self.width:
             self.facing = -1
+
         
-        # プレイヤーとの距離を確認
+        # Check distance to player
         dist = math.hypot(player.x - self.x, player.y - self.y)
+
         
-        # 接近時に突進 (クールタイム時のみ)
+        # Dash on approach (only when cooldown is off)
         if dist < 300 and self.attack_cooldown <= 0:
             dash_dir = 1 if player.x > self.x else -1
             self.vx = dash_dir * 35 # 28 -> 35
             self.attack_cooldown = random.randint(120, 240)
-            self.facing = dash_dir # 突進方向に顔を向ける
+            self.facing = dash_dir # Face the dash direction
+
         
-        # 通常時は一定速度で移動 (突進中=vxが大きい時はそちらの物理挙動に任せる)
+        # Normal movement (if vx is small, otherwise let dash handle it)
         if abs(self.vx) < 3:
             self.x += self.speed * self.facing
+
         
-        # 接触ダメージ
+        # Contact damage
         if player.x < self.x + self.width and self.x < player.x + player.width and \
            player.y < self.y + self.height and self.y < player.y + player.height:
             player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
+
 
 class PinkEnemy(Enemy):
     def __init__(self, x, y, hp=2, attack_damage=1):
@@ -2446,15 +2581,17 @@ class PinkEnemy(Enemy):
 
     def _update_physics(self):
         self.x += self.vx
-        self.vx *= 0.92 # ユーザー調整済み
+        self.vx *= 0.92 # User-adjusted
+
         
-        # 画面外への脱走を防止
+        # Prevent screen escaping
         if self.x < 0:
             self.x = 0
             self.vx *= -0.5
         elif self.x > width - self.width:
             self.x = width - self.width
             self.vx *= -0.5
+
         
         if self.y < 0:
             self.y = 0
@@ -2462,28 +2599,32 @@ class PinkEnemy(Enemy):
             self.y = ground - self.height
 
     def _update_behavior(self, player):
-        # 左右のパトロール挙動 (画面端で反転)
+        # Left/right patrol (flip at screen edge)
         if self.x <= 0:
             self.facing = 1
         elif self.x >= width - self.width:
             self.facing = -1
 
-        # プレイヤーとの距離を確認
+
+        # Check distance to player
         dist = math.hypot(player.x - self.x, player.y - self.y)
 
+
         if self.attack_cooldown <= 0:
-            if dist < 400 and random.random() < 0.3: # 接近時のみ低確率ダッシュ
+            if dist < 400 and random.random() < 0.3: # Low-chance dash when close
                 dash_dir = 1 if player.x > self.x else -1
                 self.vx = dash_dir * 30 # 22 -> 30
                 self.facing = dash_dir
-            else: # それ以外は少し離れた空から積極的に射撃
+            else: # Otherwise, shoot from distance in the air
                 angle = math.atan2(player.y - self.y, player.x - self.x)
                 enemy_bullets.append(EnemyBullet(self.x + 12, self.y + 12, angle, self.attack_damage))
-            self.attack_cooldown = random.randint(90, 160) # 間隔をさらに短く
+            self.attack_cooldown = random.randint(90, 160) # Shorten interval further
+
         
-        # 通常時は一定速度で移動
+        # Normal movement at constant speed
         if abs(self.vx) < 3:
             self.x += self.speed * self.facing
+
         
         # Contact damage
         if player.x < self.x + self.width and self.x < player.x + player.width and \
@@ -2497,21 +2638,23 @@ class GreenEnemy(Enemy):
         self.is_jumping = False
 
     def _update_physics(self):
-        # 重力適用
+        # Apply gravity
         if self.y < ground - self.height:
             self.vy += 0.8
             self.is_jumping = True
-        elif self.vy > 0: # 落下中のみ
+
+        elif self.vy > 0: # Only while falling
             self.vy = 0
             self.y = ground - self.height
             if self.is_jumping:
-                self.vx = 0 # 着地時に横移動を止める
+                self.vx = 0 # Stop horizontal movement on landing
                 self.is_jumping = False
+
         
         self.y += self.vy
         self.x += self.vx
         
-        # 画面外への脱走を防止
+        # Prevent screen escaping
         if self.x < 0:
             self.x = 0
             self.vx *= -0.5
@@ -2519,29 +2662,34 @@ class GreenEnemy(Enemy):
             self.x = width - self.width
             self.vx *= -0.5
 
+
     def _update_behavior(self, player):
-        # 地面にいて攻撃可能ならプレイヤーに向かってジャンプ
+        # Jump toward player if on ground and ready to attack
         if not self.is_jumping and self.attack_cooldown <= 0:
             dx = player.x - self.x
             self.vy = self.jump_power
-            # 距離に応じて横軸速度を調整（少し手前に飛ぶように）
+            # Adjust horizontal speed based on distance (aim slightly short)
             self.vx = dx * 0.05
             self.attack_cooldown = random.randint(120, 180)
             self.is_jumping = True
+
         
-        # 通常時のパトロール（ジャンプしていない時のみ）
+        # Normal patrol (only when not jumping)
+
         if not self.is_jumping:
             if self.x <= 0: self.facing = 1
             elif self.x >= width - self.width: self.facing = -1
             self.x += self.speed * 0.5 * self.facing
 
-        # 接触ダメージ
+        # Contact damage
+
         if player.x < self.x + self.width and self.x < player.x + player.width and \
            player.y < self.y + self.height and self.y < player.y + player.height:
             player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
 
 class ShieldEnemy(Enemy):
-    """盾持ち: 正面からのダメージを50%軽減"""
+    """Shield Bearer: Reduces front-facing damage by 50%"""
+
     def __init__(self, x, y, hp=5, attack_damage=1):
         super().__init__(x, y, hp, (150, 50, 150), 'shield', attack_damage)
         self.speed = random.uniform(1.5, 2.5)
@@ -2555,18 +2703,21 @@ class ShieldEnemy(Enemy):
         elif self.x > width - self.width: self.x = width - self.width; self.vx *= -0.5
 
     def _update_behavior(self, player):
-        # 常にプレイヤーに正面を向ける
+        # Always face the player
+
         self.facing = 1 if player.x > self.x else -1
         if abs(self.vx) < 3:
             self.x += self.speed * self.facing
-        # 接触ダメージ
+        # Contact damage
+
         if player.x < self.x + self.width and self.x < player.x + player.width and \
            player.y < self.y + self.height and self.y < player.y + player.height:
             player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
 
     def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None):
-        # 正面（facing方向）からの攻撃はダメージ半減
+        # Halve damage if attacking from the front (facing direction)
         if not status_effect and source_facing == self.facing:
+
             damage = max(1, damage // 2)
             knockback_x = max(1, knockback_x // 2)
         return super().take_damage(damage, source_facing, knockback_x, knockback_y, status_effect, element)
@@ -2574,13 +2725,15 @@ class ShieldEnemy(Enemy):
     def draw(self, screen):
         super().draw(screen)
         if self.spawn_timer > 0 or self.hp <= 0: return
-        # 盾を描画
+        # Render shield
+
         shield_x = self.x + (self.width if self.facing == 1 else -10)
         shield_color = (200, 100, 200) if self.frozen_timer <= 0 else (150, 200, 255)
         pygame.draw.rect(screen, shield_color, (int(shield_x), int(self.y + 5), 10, 30))
 
 class HealerEnemy(Enemy):
-    """回復役: 周囲の敵を定期的に回復する"""
+    """Healer: Periodically heals surrounding enemies"""
+
     def __init__(self, x, y, hp=4, attack_damage=1):
         super().__init__(x, y, hp, (50, 200, 50), 'healer', attack_damage)
         self.heal_cooldown = 0
@@ -2599,7 +2752,8 @@ class HealerEnemy(Enemy):
     def _update_behavior(self, player):
         if self.heal_effect_timer > 0: self.heal_effect_timer -= 1
         dist = math.hypot(player.x - self.x, player.y - self.y)
-        # プレイヤーから距離を取る
+        # Keep distance from player
+
         if dist < 200:
             flee_dir = -1 if player.x > self.x else 1
             if abs(self.vx) < 3: self.x += self.speed * 2 * flee_dir
@@ -2608,7 +2762,8 @@ class HealerEnemy(Enemy):
             if self.x <= 0: self.facing = 1
             elif self.x >= width - self.width: self.facing = -1
             if abs(self.vx) < 3: self.x += self.speed * self.facing
-        # 回復行動
+        # Healing action
+
         if self.heal_cooldown <= 0:
             healed = False
             for e in enemies:
@@ -2621,7 +2776,8 @@ class HealerEnemy(Enemy):
                 self.heal_effect_timer = 30
         else:
             self.heal_cooldown -= 1
-        # 接触ダメージ
+        # Contact damage
+
         if player.x < self.x + self.width and self.x < player.x + player.width and \
            player.y < self.y + self.height and self.y < player.y + player.height:
             player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
@@ -2629,11 +2785,13 @@ class HealerEnemy(Enemy):
     def draw(self, screen):
         super().draw(screen)
         if self.spawn_timer > 0 or self.hp <= 0: return
-        # 十字マークを描画
+        # Render cross mark
+
         cx, cy = int(self.x + self.width // 2), int(self.y + self.height // 2)
         pygame.draw.line(screen, (255, 255, 255), (cx - 8, cy), (cx + 8, cy), 3)
         pygame.draw.line(screen, (255, 255, 255), (cx, cy - 8), (cx, cy + 8), 3)
-        # 回復エフェクト
+        # Healing effect
+
         if self.heal_effect_timer > 0:
             radius = int((30 - self.heal_effect_timer) * 7)
             if radius > 0:
@@ -2643,7 +2801,7 @@ class HealerEnemy(Enemy):
                 screen.blit(surf, (cx - radius - 1, cy - radius - 1))
 
 class BomberEnemy(Enemy):
-    """自爆型: 倒されると爆発し範囲ダメージ"""
+    """Bomber: Explodes and deals area damage when defeated"""
     def __init__(self, x, y, hp=2, attack_damage=1):
         super().__init__(x, y, hp, (255, 150, 0), 'bomber', attack_damage)
         self.speed = random.uniform(4, 6)
@@ -2661,11 +2819,13 @@ class BomberEnemy(Enemy):
         elif self.x > width - self.width: self.x = width - self.width; self.vx *= -0.5
 
     def _update_behavior(self, player):
-        # プレイヤーに向かって高速突進
+        # Dash toward player at high speed
+
         self.facing = 1 if player.x > self.x else -1
         if abs(self.vx) < 3:
             self.x += self.speed * self.facing
-        # 接触ダメージ
+        # Contact damage
+
         if player.x < self.x + self.width and self.x < player.x + player.width and \
            player.y < self.y + self.height and self.y < player.y + player.height:
             player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
@@ -2676,22 +2836,26 @@ class BomberEnemy(Enemy):
         self.explosion_timer = 20
 
     def explode(self, target_player):
-        """爆発処理: プレイヤーと周囲の敵にダメージ"""
+        """Explosion process: Damage player and nearby enemies"""
+
         cx = self.x + self.width // 2
         cy = self.y + self.height // 2
-        # プレイヤーへのダメージ
+        # Damage to player
+
         pdist = math.hypot(target_player.x + 20 - cx, target_player.y + 20 - cy)
         if pdist < self.explosion_radius:
             sf = 1 if target_player.x > cx else -1
             target_player.take_damage(self.explosion_damage, sf)
-        # 周囲の敵へのダメージ
+        # Damage to nearby enemies
+
         for e in enemies:
             if e is self or e.hp <= 0: continue
             edist = math.hypot(e.x + e.width // 2 - cx, e.y + e.height // 2 - cy)
             if edist < self.explosion_radius:
                 sf = 1 if e.x > cx else -1
                 e.take_damage(self.explosion_damage, sf, status_effect=True, element='fire')
-        # 大量の破片
+        # Massive amount of debris
+
         for _ in range(20):
             self.debris_particles.append({
                 'x': cx + random.randint(-20, 20), 'y': cy + random.randint(-20, 20),
@@ -2701,7 +2865,8 @@ class BomberEnemy(Enemy):
 
     def draw(self, screen):
         if self.explosion_timer > 0:
-            # 爆発エフェクト
+            # Explosion effect
+
             cx, cy = int(self.x + self.width // 2), int(self.y + self.height // 2)
             r = int((20 - self.explosion_timer) / 20 * self.explosion_radius)
             alpha = int(self.explosion_timer / 20 * 200)
@@ -2717,14 +2882,16 @@ class BomberEnemy(Enemy):
             return
         super().draw(screen)
         if self.spawn_timer > 0 or self.hp <= 0: return
-        # 点滅する警告マーク
+        # Blinking warning mark
+
         if (pygame.time.get_ticks() // 300) % 2 == 0:
             cx = int(self.x + self.width // 2)
             cy = int(self.y + 5)
             pygame.draw.polygon(screen, (255, 255, 0), [(cx, cy - 5), (cx - 4, cy + 5), (cx + 4, cy + 5)])
 
 class SniperEnemy(Enemy):
-    """狙撃型: 遠距離から予告線付きの高威力弾"""
+    """Sniper: High-damage bullets with a warning line from long distance"""
+
     def __init__(self, x, y, hp=2, attack_damage=2):
         super().__init__(x, y, hp, (200, 200, 50), 'sniper', attack_damage)
         self.speed = random.uniform(1, 2)
@@ -2743,7 +2910,7 @@ class SniperEnemy(Enemy):
     def _update_behavior(self, player):
         dist = math.hypot(player.x - self.x, player.y - self.y)
         self.facing = 1 if player.x > self.x else -1
-        # プレイヤーから距離を取る
+        # Keep distance from player
         if dist < 300:
             flee_dir = -1 if player.x > self.x else 1
             if abs(self.vx) < 3: self.x += self.speed * 2 * flee_dir
@@ -2751,7 +2918,8 @@ class SniperEnemy(Enemy):
             if self.x <= 0: self.facing = 1
             elif self.x >= width - self.width: self.facing = -1
             self.x += self.speed * 0.5 * self.facing
-        # 狙撃: 予告 → 射撃の2段階
+        # Snipe: Warning -> Shoot stages
+
         if self.aim_timer > 0:
             self.aim_timer -= 1
             self.aim_angle = math.atan2(player.y + 20 - (self.y + 20), player.x + 20 - (self.x + 20))
@@ -2762,7 +2930,8 @@ class SniperEnemy(Enemy):
             self.aim_timer = 60
         else:
             self.shoot_cooldown -= 1
-        # 接触ダメージ
+        # Contact damage
+
         if player.x < self.x + self.width and self.x < player.x + player.width and \
            player.y < self.y + self.height and self.y < player.y + player.height:
             player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
@@ -2770,24 +2939,27 @@ class SniperEnemy(Enemy):
     def draw(self, screen):
         super().draw(screen)
         if self.spawn_timer > 0 or self.hp <= 0: return
-        # 予告線（レーザーサイト）
+        # Warning line (laser sight)
         if self.aim_timer > 0:
+
             sx, sy = int(self.x + 20), int(self.y + 20)
             ex = sx + int(math.cos(self.aim_angle) * 600)
             ey = sy + int(math.sin(self.aim_angle) * 600)
             blink = self.aim_timer % 6 < 3
             color = (255, 0, 0) if blink else (200, 50, 50)
             pygame.draw.line(screen, color, (sx, sy), (ex, ey), 2)
-        # 照準マーク
+        # Aim mark
+
         cx = int(self.x + self.width // 2)
         cy = int(self.y + self.height // 2)
         pygame.draw.circle(screen, (255, 255, 100), (cx, cy), 4)
 
 class BlockGolemBoss(Enemy):
     """
-    Wave 5ごとに出現する巨大ボス。
-    HPが高く、ジャンププレス、拡散弾、防御シールドを使用する。
+    Giant boss that appears every 5 waves.
+    High HP, uses jump press, spread shots, and defense shield.
     """
+
     def __init__(self, x, y, hp=100, attack_damage=2):
         super().__init__(x, y, hp, (218, 165, 32), 'boss', attack_damage) # Goldenrod color
         self.width, self.height = 100, 100
@@ -2799,13 +2971,14 @@ class BlockGolemBoss(Enemy):
         self.shockwave_timer = 0
 
     def _update_physics(self):
-        # 重力適用
+        # Apply gravity
         if self.y < ground - self.height:
+
             self.vy += 0.8
         elif self.vy > 0:
             self.vy = 0
             self.y = ground - self.height
-            # 着地時に衝撃波判定
+            # Shockwave detection on landing
             if self.current_action == 'jump':
                 self.shockwave_timer = 30
                 self.current_action = None
@@ -2818,7 +2991,7 @@ class BlockGolemBoss(Enemy):
         if self.shield_timer > 0: self.shield_timer -= 1
         if self.shockwave_timer > 0:
             self.shockwave_timer -= 1
-            # 衝撃波ダメージ（プレイヤーが地上にいる場合のみ）
+            # Shockwave damage (only if player on ground)
             if player.y + player.height >= ground - 5:
                 dist = abs((self.x + self.width // 2) - (player.x + player.width // 2))
                 if dist < 300:
@@ -2828,40 +3001,44 @@ class BlockGolemBoss(Enemy):
         if self.action_timer > 0:
             self.action_timer -= 1
             if self.current_action == 'shoot' and self.action_timer % 20 == 0:
-                # 拡散弾
+                # Spread shot
                 for angle in [-0.2, 0, 0.2]:
                     base_angle = math.atan2(player.y - self.y, player.x - self.x)
                     enemy_bullets.append(EnemyBullet(self.x + 50, self.y + 50, base_angle + angle, self.attack_damage))
             return
 
-        # 次の行動を選択
+        # Choose next action
         r = random.random()
-        if r < 0.3: # ジャンプ
+        if r < 0.3: # Jump
+
             self.current_action = 'jump'
             self.vy = -25
             self.vx = (1 if player.x > self.x else -1) * 10
             self.action_timer = 120
-        elif r < 0.6: # 射撃
+        elif r < 0.6: # Shoot
+
             self.current_action = 'shoot'
             self.action_timer = 60
-        elif r < 0.8: # シールド
+        elif r < 0.8: # Shield
+
             self.current_action = 'shield'
             self.shield_timer = 120
             self.action_timer = 150
-        else: # 移動
+        else: # Move
+
             self.facing = 1 if player.x > self.x else -1
             self.vx = self.facing * 5
             self.action_timer = 60
 
-        # 接触ダメージ
+        # Contact damage
         if player.x < self.x + self.width and self.x < player.x + player.width and \
            player.y < self.y + self.height and self.y < player.y + player.height:
             player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
 
     def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None):
         if self.shield_timer > 0:
-            damage = max(1, damage // 5) # シールド中は80%軽減
-        # ボスはノックバックしにくい
+            damage = max(1, damage // 5) # [Translated/Cleaned Comment]
+        # Boss is resistant to knockback
         return super().take_damage(damage, source_facing, knockback_x * 0.2, knockback_y * 0.2, status_effect, element)
 
     def draw(self, screen):
@@ -2869,17 +3046,17 @@ class BlockGolemBoss(Enemy):
             super().draw(screen)
             return
         
-        # ボス本体
+        # Boss body
         color = self.color
         if self.hit_timer > 0: color = (255, 255, 255)
-        elif self.shield_timer > 0: color = (200, 200, 255) # 青白く光る
+        elif self.shield_timer > 0: color = (200, 200, 255) # Glows pale blue
         
         pygame.draw.rect(screen, color, (int(self.x), int(self.y), self.width, self.height))
-        # 模様
+        # Patterns
         pygame.draw.rect(screen, (0, 0, 0), (int(self.x), int(self.y), self.width, self.height), 2)
         pygame.draw.rect(screen, (0, 0, 0), (int(self.x + 20), int(self.y + 20), 60, 60), 1)
         
-        # HPバー
+        # HP Bar
         bar_w = 400
         bar_h = 20
         pygame.draw.rect(screen, (50, 50, 50), (width // 2 - bar_w // 2, 20, bar_w, bar_h))
@@ -2887,7 +3064,7 @@ class BlockGolemBoss(Enemy):
         pygame.draw.rect(screen, (255, 0, 0), (width // 2 - bar_w // 2, 20, int(bar_w * hp_ratio), bar_h))
         pygame.draw.rect(screen, (255, 255, 255), (width // 2 - bar_w // 2, 20, bar_w, bar_h), 2)
         
-        # 衝撃波エフェクト
+        # Shockwave effect
         if self.shockwave_timer > 0:
             r = int((30 - self.shockwave_timer) * 10)
             pygame.draw.ellipse(screen, (255, 255, 200), (self.x + 50 - r, ground - 20, r * 2, 40), 2)
@@ -2902,9 +3079,9 @@ def start_next_wave():
     wave_number += 1
     wave_start_wait_timer = 60
     enemies = []
-    enemy_bullets = [] # 前のWaveの弾を消去
+    enemy_bullets = [] # Clear previous wave bullets
     
-    # 転生者モードのみボスが出現するように制限
+    # Boss spawn restricted to Reincarnator mode
     is_reincarnMode = getattr(player.character, 'is_reincarnator_mode', False)
     
     # Boss Wave Check
@@ -2914,12 +3091,12 @@ def start_next_wave():
         enemies.append(BlockGolemBoss(width // 2 - 50, ground - 100, hp=boss_hp, attack_damage=boss_atk))
         return
 
-    # Wave 1 は 2体。2 Wave ごとに 1体ずつ増え、最大8体
+    # Wave 1: 2 enemies. Increases by 1 every 2 waves, max 8
     num_enemies = min(2 + wave_number // 2, 8)
     
-    # 転生者モード以外は強化速度半減
+    # Non-Reincarnator modes scale half as fast
     
-    # 敵の強化計算（Wave20以降は2waveおき、Wave40以降は1waveおき）
+    # Enemy scaling: every 2 waves after W20, every wave after W40
     if wave_number < 20:
         hp_bonus = wave_number // 3
         atk_bonus = wave_number // 4
@@ -2942,7 +3119,7 @@ def start_next_wave():
         r = random.random()
         enemy = None
         
-        # Wave進行に応じて新種を追加
+        # Add new species as waves progress
         if wave_number >= 7 and r < 0.10:
             enemy = SniperEnemy(rx, ground - 40, hp=max(2, enemy_hp - 1), attack_damage=enemy_atk)
         elif wave_number >= 5 and r < 0.25:
@@ -2992,7 +3169,7 @@ async def main():
     is_fullscreen = False
 
     while running:
-        # --- スマホモード時の仮想キー状態更新 ---
+        # Update virtual key states for smartphone ---
         if smartphone_mode:
             touch_keys['left'] = any(V_PAD['left'].collidepoint(pos) for pos in active_fingers.values())
             touch_keys['right'] = any(V_PAD['right'].collidepoint(pos) for pos in active_fingers.values())
@@ -3006,15 +3183,15 @@ async def main():
                 pygame.display.toggle_fullscreen()
                 is_fullscreen = not is_fullscreen
             
-            # --- スマートフォン タッチ入力処理 ---
+            # --- Smartphone touch processing ---
             if event.type == pygame.FINGERDOWN or event.type == pygame.FINGERMOTION:
                 px, py = event.x * width, event.y * height
                 active_fingers[event.finger_id] = (px, py)
                 
-                # スキルアイコンのタッチ判定 (FINGERDOWN時のみ)
+                # Skill icon touch detection (FINGERDOWN only)
                 if event.type == pygame.FINGERDOWN and player.character:
                     for s in player.character.skills:
-                        # アイコン領域(40x40)より少し広く判定(60x60)
+                        # Detection area (60x60) wider than icon (40x40)
                         s_touch_rect = pygame.Rect(s.x - 10, s.y - 10, 60, 60)
                         if s_touch_rect.collidepoint(px, py):
                             s.activate(player, enemies if 'enemies' in locals() else [])
@@ -3032,10 +3209,10 @@ async def main():
                         game_state = STATE_SETTINGS
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     mx, my = pygame.mouse.get_pos()
-                    # 「Character Selectへ進む」エリア
+                    # "Character Select" area
                     if width // 2 - 300 <= mx <= width // 2 + 300 and 45 <= my <= 105:
                         game_state = STATE_SELECT_CHAR
-                    # 「スマホモード切り替え」ボタン
+                    # "Smartphone Mode" toggle button
                     if width // 2 - 150 <= mx <= width // 2 + 150 and 130 <= my <= 180:
                         smartphone_mode = not smartphone_mode
 
@@ -3089,7 +3266,7 @@ async def main():
                             if player.character:
                                 player.character.is_reincarnator_mode = player.reincarnator_mode
 
-                            # プレイヤー位置などをリセットし、戦闘開始
+                            # Reset player position and start battle
                             player.x, player.y = 400, 350
                             player.vx, player.vy = 0, 0
                             player.hp = player.max_hp
@@ -3102,7 +3279,7 @@ async def main():
                             game_state = STATE_PLAYING
                             break
                     
-                    # スマホモード判定領域 (画面下部中央付近をタッチでもトグル可能にする)
+                    # Smartphone mode toggle area
                     if 400 < mx < 800 and 480 < my < 550:
                         smartphone_mode = not smartphone_mode
 
@@ -3162,12 +3339,12 @@ async def main():
                                     start_next_wave()
                                     game_state = STATE_PLAYING
                                 else:
-                                    # REPLACE 状態に遷移した（waveは入れ替え後に開始）
+                                    # Transitioned to REPLACE state (wave starts after)
                                     pass
                                 break
                 elif (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE) or \
                      (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and smartphone_mode):
-                    # 報酬をスキップ (スマホなら画面タップでもスキップ可能にする)
+                    # Skip reward (can also tap on phone)
                     start_next_wave()
                     game_state = STATE_PLAYING
 
@@ -3185,16 +3362,16 @@ async def main():
                     for i in range(3):
                         rect = pygame.Rect(start_x + i * (card_w + spacing), start_y, card_w, card_h)
                         if rect.collidepoint(mx, my):
-                            # 報酬適用
-                            if i == 0: # アップグレード枠増加
+                            # Apply reward
+                            if i == 0: # Increase upgrade slots
                                 player.character.upgrade_slots += 1
-                            elif i == 1: # スキル進化
-                                # TODO: スキル選択画面へ？とりあえず全スキル+3するか、ランダムか。
-                                # ユーザー要望は「スキル1つ進化」なので、簡易的に所持スキルのうちランダム1つを強化
+                            elif i == 1: # Skill evolution
+                                # [Translated/Cleaned Comment]
+                                # User requested "1 skill evolution", so randomly enhance one owned skill
                                 if player.character.skills:
                                     s = random.choice(player.character.skills)
                                     s.damage_bonus += 3
-                            elif i == 2: # 英雄の加護
+                            elif i == 2: # Hero's Blessing
                                 player.max_hp += 10
                                 player.hp = player.max_hp
                                 player.defense += 1
@@ -3206,20 +3383,20 @@ async def main():
             elif game_state == STATE_REPLACE_SKILL:
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     mx, my = pygame.mouse.get_pos()
-                    # 描画(200 + i * 160)と合わせた位置で判定
+                    # [Translated/Cleaned Comment]
                     for i in range(len(player.character.skills)):
                         rect = pygame.Rect(200 + i * 160, 250, 80, 80)
                         if rect.collidepoint(mx, my):
-                            # スキルを入れ替え
+                            # Swap skill
                             player.character.skills[i] = player.character.queued_skill
                             player.character.queued_skill = None
                             start_next_wave()
                             game_state = STATE_PLAYING
                             break
-                    # キャンセルボタンなどの判定があればここに追加（今回は強制入れ替えまたは継続と想定）
+                    # [Translated/Cleaned Comment]
                 elif (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE) or \
                      (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and smartphone_mode):
-                    # キャンセル（入れ替えない。スマホなら画面タップでもスキップ可能にする）
+                    # [Translated/Cleaned Comment]
                     player.character.queued_skill = None
                     start_next_wave()
                     game_state = STATE_PLAYING
@@ -3231,11 +3408,11 @@ async def main():
                     if event.key == key_config['pause']:
                         game_state = STATE_PAUSED
                     if event.key == pygame.K_p and not is_combat_mode:
-                        # 戦闘モード開始
+                        # Start combat mode
                         is_combat_mode = True
                         wave_number = 0
                         start_next_wave()
-                    if event.key == pygame.K_r: # 手動スポーン
+                    if event.key == pygame.K_r: # Manual spawn
                         enemies.append(Enemy(width - 100, ground))
         
             elif game_state == STATE_PAUSED:
@@ -3260,20 +3437,20 @@ async def main():
 
         keys = pygame.key.get_pressed()
     
-        # ロジックの更新
+        # Update logic
         if game_state in [STATE_PLAYING, STATE_LOBBY]:
             if hit_stop_timer > 0:
                 hit_stop_timer -= 1
             else:
                 player.update_timers()
-                # READY中（カウントダウン中）は、スキルに敵のリストを渡さない（＝ダメージ判定を発生させない）
+                # During READY (countdown), don't pass enemy list to skills (prevent damage)
                 enemies_for_player = enemies if (game_state == STATE_PLAYING and wave_start_wait_timer <= 0) else []
                 player.update(keys, enemies_for_player)
 
                 if wave_start_wait_timer > 0:
                     wave_start_wait_timer -= 1
 
-                # 衝突分離
+                # Collision separation
                 active_list = [e for e in enemies if e.hp > 0]
                 separate_actors([player] + active_list)
 
@@ -3288,22 +3465,22 @@ async def main():
                         e.explosion_timer -= 1
                     e.update_debris()
 
-                # 敵弾の更新
+                # Update enemy bullets
                 for b in enemy_bullets[:]:
                     if b.update(player) or b.timer <= 0:
                         enemy_bullets.remove(b)
             
-                # 全滅したら次のウェーブへ (インターバルを挟む)
+                # Next wave when cleared (with interval)
                 if is_combat_mode and active_enemies == 0:
                     if wave_clear_timer <= 0:
-                        wave_clear_timer = 120 # 2秒間待機
+                        wave_clear_timer = 120 # Wait 2 seconds
                     else:
                         wave_clear_timer -= 1
                         if wave_clear_timer == 1:
                             is_reincarn = player.character and getattr(player.character, 'is_reincarnator_mode', False)
                             if is_reincarn:
                                 if wave_number > 0 and wave_number % 5 == 0:
-                                    # ボス撃破後の特別報酬へ
+                                    # Special reward after boss defeat
                                     game_state = STATE_BOSS_REWARD
                                     wave_clear_timer = 0
                                 else:
@@ -3314,16 +3491,16 @@ async def main():
                                 start_next_wave()
                                 wave_clear_timer = 0
 
-        # 描画
+        # Draw
         screen.fill((155, 155, 155))
         pygame.draw.rect(screen, (155, 200, 200), (0, ground, 2000, 100))
     
-        # 足場の描画
+        # Draw platform
         if game_state in [STATE_PLAYING, STATE_LOBBY]:
             pygame.draw.rect(screen, (120, 140, 160), (PLATFORM_X, PLATFORM_Y, PLATFORM_W, PLATFORM_H))
             pygame.draw.rect(screen, (180, 200, 220), (PLATFORM_X, PLATFORM_Y, PLATFORM_W, 4))
     
-        # UIの描画
+        # Draw UI
         if game_state != STATE_SELECT_CHAR:
             hp_text = font_main.render(f"PLAYER HP: {player.hp} / {player.max_hp}", True, (0, 0, 0))
             screen.blit(hp_text, (width - 320, 20))
@@ -3344,9 +3521,9 @@ async def main():
         for b in enemy_bullets:
             b.draw(screen)
 
-        # ロビーとセレクト画面のオーバーレイ
+        # Lobby and select screen overlay
         if game_state == STATE_LOBBY:
-            # メインボタン (ENTER / タップで開始)
+            # Main button (ENTER / Tap to start)
             btn_rect = pygame.Rect(width//2 - 300, 45, 600, 60)
             pygame.draw.rect(screen, (30, 30, 50), btn_rect, border_radius=10)
             pygame.draw.rect(screen, (200, 200, 255), btn_rect, 2, border_radius=10)
@@ -3354,7 +3531,7 @@ async def main():
             prompt_text = font_title.render("Tap to open Character Select", True, (255, 255, 200))
             screen.blit(prompt_text, (width//2 - prompt_text.get_width()//2, 55))
             
-            # スマホモード切替ボタン
+            # Smartphone mode toggle button
             s_btn_rect = pygame.Rect(width//2 - 150, 130, 300, 50)
             s_color = (100, 200, 255) if smartphone_mode else (80, 80, 80)
             pygame.draw.rect(screen, (40, 40, 60), s_btn_rect, border_radius=5)
@@ -3440,15 +3617,15 @@ async def main():
                 ry = start_y
                 rect = pygame.Rect(rx, ry, card_w, card_h)
                 
-                # カード背景
+                # Card background
                 pygame.draw.rect(screen, (40, 40, 60), rect, border_radius=15)
                 pygame.draw.rect(screen, r["color"], rect, 3, border_radius=15)
                 
-                # テキスト
+                # Text
                 name_s = font_upgrade_name.render(r["name"], True, (255, 255, 255))
                 desc_s = font_upgrade_desc.render(r["desc"], True, (200, 200, 200))
                 screen.blit(name_s, (rx + 15, ry + 30))
-                # 改行対応は簡易的に
+                # Simple newline handling
                 screen.blit(desc_s, (rx + 15, ry + 120))
 
         elif game_state == STATE_PAUSED:
@@ -3499,17 +3676,17 @@ async def main():
             
                 name_text = font_card_name.render(card["name"], True, (255, 255, 255))
                 screen.blit(name_text, (cx + 10, cy + (10 if is_hovered else 20)))
-                # スキル名の表示
+                # Display skill names
                 for si, skill_line in enumerate(card["skills"].split("\n")):
                     st = font_card_skill.render(skill_line, True, (220, 220, 220))
                     screen.blit(st, (cx + 10, cy + (45 if is_hovered else 55) + si * 18))
 
-            # 転生者モードのトグル表示
+            # Reincarnator mode toggle display
             mode_text = "Reincarnator Mode: ON" if player.reincarnator_mode else "Reincarnator Mode: OFF"
             mode_color = (100, 255, 100) if player.reincarnator_mode else (150, 150, 150)
             mode_surf = font_main.render(mode_text, True, mode_color)
             
-            # スマホモードのトグル表示
+            # Smartphone mode toggle display
             s_mode_text = "Smartphone Mode: ON" if smartphone_mode else "Smartphone Mode: OFF"
             s_mode_color = (100, 200, 255) if smartphone_mode else (150, 150, 150)
             s_mode_surf = font_main.render(s_mode_text, True, s_mode_color)
@@ -3609,7 +3786,7 @@ async def main():
             title_text = font_main.render("Select a skill to replace", True, (255, 255, 100))
             screen.blit(title_text, (width // 2 - title_text.get_width() // 2, 100))
             
-            # 現在のスキルを表示
+            # Display current skills
             for i, s in enumerate(player.character.skills):
                 sx = 200 + i * 160
                 sy = 250
@@ -3617,12 +3794,12 @@ async def main():
                 pygame.draw.rect(screen, s.color_ready, icon_rect, border_radius=5)
                 pygame.draw.rect(screen, (255, 255, 255), icon_rect, 2, border_radius=5)
                 
-                # スキル名（クラス名から推測）
+                # Skill name (inferred from class name)
                 skill_name = type(s).__name__.replace("Skill", "")
                 st = font_card_skill.render(skill_name, True, (255, 255, 255))
                 screen.blit(st, (sx, sy + 90))
 
-            # 新しいスキルを表示
+            # Display new skill
             new_s = player.character.queued_skill
             if new_s:
                 nx = width // 2 - 40
@@ -3661,13 +3838,13 @@ async def main():
                 wave_start_wait_timer = 0
                 game_state = STATE_LOBBY
 
-        # --- スマートフォン用バーチャルパッドの描画 (最前面) ---
+        # --- Draw virtual pad for smartphone (topmost) ---
         if smartphone_mode:
             v_overlay = pygame.Surface((width, height), pygame.SRCALPHA)
             for btn_name, rect in V_PAD.items():
-                # 各ボタンの描画 (半透明の白)
+                # Draw each button (semi-transparent white)
                 color = (255, 255, 255, 60)
-                # 押されている間は明るく
+                # Brighten while pressed
                 if touch_keys.get(btn_name, False):
                     color = (255, 255, 255, 120)
                 

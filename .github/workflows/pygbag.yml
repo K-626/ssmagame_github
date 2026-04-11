@@ -37,6 +37,8 @@ jobs:
           pip install pygbag
 
       - name: Build Pygbag
+        env:
+          PYTHONUTF8: 1
         run: |
           # Build the game directory
           python -m pygbag --build game/
