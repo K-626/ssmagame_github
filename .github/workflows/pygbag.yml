@@ -6,6 +6,9 @@ on:
       - main
       - master
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 # GitHub Pagesにデプロイするための権限設定
 permissions:
   contents: read
