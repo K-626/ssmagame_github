@@ -791,11 +791,10 @@ class Character:
         self.queued_skill = None         # [Translated/Cleaned Comment]
 
     def handle_event(self, event, enemies):
-        """
-                            
-                                   
-        """
         if event.type == pygame.KEYDOWN:
+            if event.key == key_config['attack']:
+                self.attack(enemies)
+
             # [Translated/Cleaned Comment]
             keys = [key_config['skill_1'], key_config['skill_2'], key_config['skill_3'], 
                     key_config['skill_4'], key_config['skill_5']]
@@ -904,12 +903,7 @@ class Character:
         """Execute basic attack (common for smartphone/keyboard)"""
         self.player.swording = 12
 
-    def handle_event(self, event, enemies):
-        """Handle input events"""
-        if event.type == pygame.KEYDOWN:
-            if event.key == key_config['attack']:
-                self.attack(enemies)
-
+    # Duplicate handle_event removed
 
 
     def update_timers(self): pass
@@ -3287,10 +3281,13 @@ async def main():
                             game_state = STATE_PLAYING
                             break
                     
-                    # Smartphone mode toggle area
-                    if 400 < mx < 800 and 480 < my < 550:
-                        smartphone_mode = (smartphone_mode + 1) % 3
-                        V_PAD = V_PAD_1 if smartphone_mode == 1 else V_PAD_2
+                    # Mode toggle areas
+                    if height - 120 <= my <= height - 50:
+                        if 300 < mx < width // 2 - 10:
+                            player.reincarnator_mode = not player.reincarnator_mode
+                        elif width // 2 + 10 < mx < 900:
+                            smartphone_mode = (smartphone_mode + 1) % 3
+                            V_PAD = V_PAD_1 if smartphone_mode == 1 else V_PAD_2
 
                 
                 elif event.type == pygame.KEYDOWN:
@@ -3617,28 +3614,40 @@ async def main():
                 ]
             else:
                 if hasattr(player.character, 'current_upgrades'):
+                    color_mapping = {
+                        "heal": (100, 255, 100), "maxhp": (100, 255, 100),
+                        "jump": (100, 200, 255), "speed": (100, 200, 255),
+                        "attack": (255, 150, 100), "defense": (255, 150, 100),
+                        "cd": (200, 100, 255), "skill": (255, 215, 0)
+                    }
                     for upg in player.character.current_upgrades:
-                        rewards.append({"name": upg["name"], "desc": upg["desc"], "color": (200, 200, 200)})
+                        color = color_mapping.get(upg.get("type", ""), (200, 200, 200))
+                        rewards.append({"name": upg["name"], "desc": upg["desc"], "color": color})
             
             total_w = len(rewards) * card_w + (len(rewards) - 1) * spacing
             start_x = (width - total_w) // 2
             start_y = height // 2 - card_h // 2
             
+            mx, my = pygame.mouse.get_pos()
             for i, r in enumerate(rewards):
                 rx = start_x + i * (card_w + spacing)
                 ry = start_y
                 rect = pygame.Rect(rx, ry, card_w, card_h)
+                is_hover = rect.collidepoint(mx, my)
+                
+                draw_rect = pygame.Rect(rx, ry - (15 if is_hover else 0), card_w, card_h)
                 
                 # Card background
-                pygame.draw.rect(screen, (40, 40, 60), rect, border_radius=15)
-                pygame.draw.rect(screen, r["color"], rect, 3, border_radius=15)
+                pygame.draw.rect(screen, (60, 60, 80) if is_hover else (40, 40, 60), draw_rect, border_radius=15)
+                pygame.draw.rect(screen, r["color"], draw_rect, 4 if is_hover else 2, border_radius=15)
                 
                 # Text
-                name_s = font_upgrade_name.render(r["name"], True, (255, 255, 255))
-                desc_s = font_upgrade_desc.render(r["desc"], True, (200, 200, 200))
-                screen.blit(name_s, (rx + 15, ry + 30))
+                name_color = r["color"] if is_hover else (255, 255, 255)
+                name_s = font_upgrade_name.render(r["name"], True, name_color)
+                desc_s = font_upgrade_desc.render(r["desc"], True, (220, 220, 220) if is_hover else (200, 200, 200))
+                screen.blit(name_s, (rx + 15, draw_rect.y + 30))
                 # Simple newline handling
-                screen.blit(desc_s, (rx + 15, ry + 120))
+                screen.blit(desc_s, (rx + 15, draw_rect.y + 120))
 
         elif game_state == STATE_PAUSED:
             overlay = pygame.Surface((width, height), pygame.SRCALPHA)
@@ -3705,10 +3714,24 @@ async def main():
             s_mode_color = (100, 200, 255) if smartphone_mode else (150, 150, 150)
             s_mode_surf = font_main.render(s_mode_text, True, s_mode_color)
             
-            hint_surf = font_settings_hint.render("Press 'R' (Reincarn) / 'T' (Smartphone) to toggle", True, (200, 200, 200))
+            # Draw button backgrounds
+            rmx, rmy = pygame.mouse.get_pos()
+            r_hover = height - 120 <= rmy <= height - 50 and 300 < rmx < width // 2 - 10
+            s_hover = height - 120 <= rmy <= height - 50 and width // 2 + 10 < rmx < 900
             
+            r_rect = pygame.Rect(width // 2 - mode_surf.get_width() - 30, height - 110, mode_surf.get_width() + 20, mode_surf.get_height() + 20)
+            s_rect = pygame.Rect(width // 2 + 10, height - 110, s_mode_surf.get_width() + 20, s_mode_surf.get_height() + 20)
+            
+            pygame.draw.rect(screen, (50, 50, 70) if r_hover else (30, 30, 40), r_rect, border_radius=5)
+            pygame.draw.rect(screen, mode_color, r_rect, 2, border_radius=5)
+            
+            pygame.draw.rect(screen, (50, 50, 70) if s_hover else (30, 30, 40), s_rect, border_radius=5)
+            pygame.draw.rect(screen, s_mode_color, s_rect, 2, border_radius=5)
+
             screen.blit(mode_surf, (width // 2 - mode_surf.get_width() - 20, height - 100))
             screen.blit(s_mode_surf, (width // 2 + 20, height - 100))
+            
+            hint_surf = font_settings_hint.render("Tap buttons, 'R' (Reincarn) / 'T' (Smartphone) to toggle", True, (200, 200, 200))
             screen.blit(hint_surf, (width // 2 - hint_surf.get_width() // 2, height - 40))
 
         elif game_state == STATE_CHOOSE_WEAPON:
