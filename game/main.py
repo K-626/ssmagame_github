@@ -22,6 +22,7 @@ STATE_CHOOSE_WEAPON = "choose_weapon" # 武器選択
 STATE_UPGRADE = "upgrade"     # ウェーブクリア後のスキル・ステータス強化
 STATE_SETTINGS = "settings"   # キー操作設定
 STATE_REPLACE_SKILL = "replace_skill" # スキル上限時に新しいスキルと入れ替える画面
+STATE_BOSS_REWARD = "boss_reward"    # ボス撃破後の特別報酬選択
 
 # --- キー設定 ---
 key_config = {
@@ -97,11 +98,21 @@ class Skill:
         self.max_cool = max_cool            # スキルの最大クールタイム
         self.color_ready = color_ready      # 使用可能時のアイコンカラー
         self.color_charge = color_charge    # 充電中のアイコンカラー
+        self.damage_bonus = 0               # 進化などによる追加ダメージ
 
     def update(self, enemies=None, cooldown_speed=1, player=None):
         """毎フレームのクールタイム減少処理"""
         if self.cool > 0:
-            self.cool -= cooldown_speed
+            cs = cooldown_speed
+            # バフスキルの場合はクールタイム短縮に制限をかける (1.3倍ルール)
+            if hasattr(self, 'active_timer') and hasattr(self, 'max_cool'):
+                duration = getattr(self, 'initial_duration', 0)
+                if duration > 0:
+                    min_cool_time = duration * 1.3
+                    # 実際の冷却速度を制限する (現在値/目標時間)
+                    cs = min(cs, self.max_cool / min_cool_time)
+            
+            self.cool -= cs
             if self.cool < 0: self.cool = 0
 
     def activate(self, player, enemies=None):
@@ -219,7 +230,7 @@ class LavaSkill(Skill):
                 for e in enemies:
                     if e.hp > 0 and self.place < e.x + e.width and e.x < self.place + self.width and e.y + e.height >= ground - 5:
                         e.burn_timer = 180
-                        e.take_damage(1, status_effect=True, element='fire')
+                        e.take_damage(1 + self.damage_bonus, status_effect=True, element='fire')
     def draw_effect(self, screen):
         if self.range > 0:
             # 透過っぽく見せるために少し暗い赤で地面を描画
@@ -253,7 +264,7 @@ class FireSkill(Skill):
                     if e.hp > 0 and e.x <= bx <= e.x + e.width and e.y <= by <= e.y + e.height:
                         # 貫通：まだこの弾が当たっていない敵ならダメージ
                         if e not in b[4]:
-                            if e.take_damage(1, 1 if b[2] > 0 else -1, element='fire'):
+                            if e.take_damage(1 + self.damage_bonus, 1 if b[2] > 0 else -1, element='fire'):
                                 b[4].append(e)
             
             # 消滅判定：寿命切れ or 画面外
@@ -281,7 +292,7 @@ class ThunderSkill(Skill):
                 # ランダムな敵を選択
                 target_enemy = random.choice(alive_enemies)
                 tx = target_enemy.x + target_enemy.width / 2
-                target_enemy.take_damage(2)
+                target_enemy.take_damage(2 + self.damage_bonus)
             else:
                 # 敵がいない場合はランダムな位置
                 tx = random.randint(50, width - 50)
@@ -300,7 +311,7 @@ class ThunderSkill(Skill):
                     if abs((e.x + e.width/2) - tx) < 40:
                         # 雷は真上からなので source_facing は適当 (0でいいが、一応左右判定)
                         sf = 1 if e.x < tx else -1
-                        e.take_damage(3, sf)
+                        e.take_damage(3 + self.damage_bonus, sf)
             return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
@@ -327,21 +338,25 @@ class DashStrikeSkill(Skill):
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
 
-class EnergySkill(Skill):
+class BraveChargeSkill(Skill):
     def __init__(self, x, y):
-        super().__init__(x, y, 600, (255, 255, 100), (200, 200, 0))
+        # クールタイム900, 持続600
+        super().__init__(x, y, 900, (255, 200, 0), (200, 100, 0))
         self.active_timer = 0
+        self.initial_duration = 600
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            self.active_timer = 300
+            self.active_timer = 600 # 10秒間
+            self.player_ref = player
             return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
-        if self.active_timer > 0: self.active_timer -= 1
+        if self.active_timer > 0:
+            self.active_timer -= 1
     def draw_effect(self, screen):
         if self.active_timer > 0 and hasattr(self, 'player_ref') and self.player_ref:
-            pygame.draw.circle(screen, (255, 255, 100), (int(self.player_ref.x+20), int(self.player_ref.y+20)), 40, 2)
+            pygame.draw.rect(screen, (255, 150, 0), (int(self.player_ref.x) - 4, int(self.player_ref.y) - 4, 48, 48), 2)
 
 class MagicSwordSkill(Skill):
     def __init__(self, x, y):
@@ -350,18 +365,23 @@ class MagicSwordSkill(Skill):
         self.waves = [] # [x, y, vx, timer, hit_enemies]
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            self.active_timer = 600 # 10秒
+            self.active_timer = 999  # 無限（回数制限のみ）にするため大きな値を設定
+            self.swings_left = 6   # 10回まで
             player.swording = 15
             return True
         return False
     def launch_wave(self, player):
-        vx = 20 * player.facing
-        # [x, y, vx, timer, hit_enemies]
-        self.waves.append([player.x + 20, player.y + 10, vx, 40, []])
+        if hasattr(self, 'swings_left') and self.swings_left > 0:
+            vx = 20 * player.facing
+            # [x, y, vx, timer, hit_enemies]
+            self.waves.append([player.x + 20, player.y + 10, vx, 40, []])
+            self.swings_left -= 1
+            if self.swings_left <= 0:
+                self.active_timer = 0 # 終了
         
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
-        if self.active_timer > 0: self.active_timer -= 1
+        # active_timerの自然減少を削除（swings_leftが0になるまで持続）
         
         new_waves = []
         for w in self.waves:
@@ -373,7 +393,7 @@ class MagicSwordSkill(Skill):
                 for e in enemies:
                     if e.hp > 0 and wave_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                         if e not in w[4]:
-                            if e.take_damage(2, 1 if w[2] > 0 else -1):
+                            if e.take_damage(2 + self.damage_bonus, 1 if w[2] > 0 else -1):
                                 w[4].append(e)
             if w[3] > 0: new_waves.append(w)
         self.waves = new_waves
@@ -421,23 +441,7 @@ class RisingStrikeSkill(Skill):
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
 
-class BraveChargeSkill(Skill):
-    def __init__(self, x, y):
-        super().__init__(x, y, 900, (255, 200, 0), (200, 100, 0))
-        self.active_timer = 0
-    def activate(self, player, enemies=None):
-        if super().activate(player, enemies):
-            self.active_timer = 600 # 10秒間
-            self.player_ref = player
-            return True
-        return False
-    def update(self, enemies=None, cooldown_speed=1, player=None):
-        super().update(enemies, cooldown_speed)
-        if self.active_timer > 0:
-            self.active_timer -= 1
-    def draw_effect(self, screen):
-        if self.active_timer > 0 and hasattr(self, 'player_ref') and self.player_ref:
-            pygame.draw.rect(screen, (255, 150, 0), (int(self.player_ref.x) - 4, int(self.player_ref.y) - 4, 48, 48), 2)
+
 
 class PiercingArrowSkill(Skill):
     def __init__(self, x, y):
@@ -470,7 +474,7 @@ class PiercingArrowSkill(Skill):
             if enemies:
                 for e in enemies:
                     if e.hp > 0 and e not in a[4] and e.x < a[0] < e.x + e.width and e.y < a[1] < e.y + e.height:
-                        if e.take_damage(2, 1 if a[2] > 0 else -1):
+                        if e.take_damage(2 + self.damage_bonus, 1 if a[2] > 0 else -1):
                             a[4].append(e) # 貫通
             if -100 < a[0] < width + 100 and -100 < a[1] < height + 100 and a[1] < ground + 20:
                 new_arrows.append(a)
@@ -569,6 +573,7 @@ class IceEnchantSkill(Skill):
     def __init__(self, x, y):
         super().__init__(x, y, 600, (150, 200, 255), (50, 100, 255))
         self.active_timer = 0
+        self.initial_duration = 420
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
             self.active_timer = 420
@@ -586,6 +591,7 @@ class FireEnchantSkill(Skill):
     def __init__(self, x, y):
         super().__init__(x, y, 600, (255, 100, 50), (255, 0, 0))
         self.active_timer = 0
+        self.initial_duration = 420
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
             self.active_timer = 420
@@ -681,8 +687,9 @@ class EarthquakeSkill(Skill):
                     self.falling = False; self.active_timer = 15
                     if enemies:
                         for e in enemies:
-                            if e.hp > 0 and e.y >= ground - 50:
-                                e.take_damage(4, 1 if e.x > self.player_ref.x else -1, knockback_y=-10, element='heavy')
+                            # 地面に接しているキャラ全員に攻撃
+                            if e.hp > 0 and e.y + e.height >= ground - 5:
+                                e.take_damage(6, 1 if e.x > self.player_ref.x else -1, knockback_y=-10, element='heavy')
     def draw_effect(self, screen):
         if self.active_timer > 0: pygame.draw.rect(screen, (255, 200, 100), (0, ground - 10, width, 20))
 
@@ -690,6 +697,7 @@ class WarCrySkill(Skill):
     def __init__(self, x, y):
         super().__init__(x, y, 720, (255, 50, 50), (150, 0, 0))
         self.active_timer = 0
+        self.initial_duration = 480
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
             self.active_timer = 480
@@ -716,6 +724,8 @@ class Character:
         self.player = player
         self.skills = []                 # 所持スキルのインスタンス
         self.is_reincarnator_mode = False # 転生者モードフラグ（キャラ選択時に決定）
+        self.max_skills = 5              # スキル所持上限（ボス報酬で増加可能）
+        self.upgrade_slots = 3           # アップグレード画面の選択肢数
         self.current_upgrades = []       # アップグレード選択肢
         self.queued_skill = None         # 入れ替え待機中の新規スキル
 
@@ -748,10 +758,15 @@ class Character:
         """
         キャラクターの状態更新。全スキルのクールタイムや状態変化を処理します。
         """
+        # 毎フレーム、ステータスをデフォルト値にリセット（バフ適用前）
+        self.player.damage_multiplier = 1.0
+        self.player.move_speed = self.get_speed()
+        self.player.jump_power = self.get_jump_power()
+
         # 全体バフ効果の適用計算（加速スキルなど）
         cs = cooldown_speed
         for s in self.skills:
-            if type(s).__name__ == "EnergySkill" and getattr(s, 'active_timer', 0) > 0:
+            if type(s).__name__ == "BraveChargeSkill" and getattr(s, 'active_timer', 0) > 0:
                 cs *= 2 # クールタイムの減少速度を2倍にする
         
         # 各スキルインスタンスの個別更新
@@ -762,8 +777,15 @@ class Character:
         for s in self.skills:
             # ブレイブチャージ（暴走）状態
             if type(s).__name__ == "BraveChargeSkill" and getattr(s, 'active_timer', 0) > 0:
-                self.player.damage_multiplier = max(self.player.damage_multiplier, 2)
+                self.player.damage_multiplier = max(self.player.damage_multiplier, 2.0)
                 self.player.move_speed = max(self.player.move_speed, 2.0)
+                # ジャンプ力アップ
+                self.player.jump_power = min(self.player.jump_power, -20)
+            
+            # ウォークライ（鼓舞）状態
+            if type(s).__name__ == "WarCrySkill" and getattr(s, 'active_timer', 0) > 0:
+                self.player.damage_multiplier = max(self.player.damage_multiplier, 1.5)
+            
             # 重力スキルによる落下速度の軽減
             if type(s).__name__ == "GravitySkill" and getattr(s, 'range', 0) > 0:
                 self.player.vy += 0.3
@@ -775,7 +797,7 @@ class Character:
         SKILL_NAMES = {
             'MagicSwordSkill': '魔法剣', 'ThunderSkill': '雷', 'IceEnchantSkill': '氷付与',
             'FireEnchantSkill': '炎付与', 'BraveChargeSkill': '突撃', 'HammerThrowSkill': '投げ槌',
-            'SuperArmorSkill': 'SA', 'EnergySkill': '加速', 'EarthquakeSkill': '地震',
+            'SuperArmorSkill': 'SA', 'EarthquakeSkill': '地震',
             'WarCrySkill': '鼓舞', 'LavaSkill': '溶岩', 'EruptionSkill': '噴火',
             'FlameDashSkill': '炎走', 'MeteorSkill': '隕石', 'PiercingArrowSkill': '貫通矢',
             'MirrorSkill': '反転', 'WarpArrowSkill': 'ワープ', 'ArrowRainSkill': '矢の雨',
@@ -789,15 +811,17 @@ class Character:
             'RoarSkill': '咆哮', 'AmpuleSkill': 'アンプル', 'RampageSkill': '暴走',
         }
         skill_keys = ['J', 'K', 'L', 'N', 'M']
-        # UI用にスキル名を日本語で表示。フォントは環境に合わせていくつか試行
-        jp_fonts = ['msgothic', 'yugothic', 'meiryo', 'msuigothic', 'arial']
-        font_sm = None
-        for f in jp_fonts:
-            try:
-                font_sm = pygame.font.SysFont(f, 14)
-                if font_sm: break
-            except: continue
-        if not font_sm: font_sm = pygame.font.SysFont(None, 14)
+        # UI用にスキル名を日本語で表示（クラス変数でキャッシュして毎フレームの負荷を軽減）
+        if not hasattr(Character, '_font_sm') or Character._font_sm is None:
+            jp_fonts = ['msgothic', 'yugothic', 'meiryo', 'msuigothic', 'arial']
+            Character._font_sm = None
+            for f in jp_fonts:
+                try:
+                    Character._font_sm = pygame.font.SysFont(f, 14)
+                    if Character._font_sm: break
+                except: continue
+            if not Character._font_sm: Character._font_sm = pygame.font.SysFont(None, 14)
+        font_sm = Character._font_sm
         # UI用にスキル位置を自動調整
         for i, s in enumerate(self.skills):
             s.x = 15 + i * 60
@@ -822,18 +846,18 @@ class Character:
         """ウェーブクリア後の報酬（ステータスUPや新スキル）を3つ生成します"""
         # ステータスアップ項目のプール
         pool = [
-            {"type": "heal", "name": "HP回復", "desc": "HPを5回復する"},
-            {"type": "maxhp", "name": "最大HP増加", "desc": "最大HP+3、HPを3回復する"},
-            {"type": "jump", "name": "ジャンプ回数+1", "desc": "空中ジャンプが1回多く可能になる"},
-            {"type": "attack", "name": "攻撃力UP", "desc": "基本ダメージに+1加算する"},
-            {"type": "defense", "name": "防御力UP", "desc": "受けるダメージを1軽減する"},
-            {"type": "speed", "name": "速度UP", "desc": "移動速度が20%上昇する"},
-            {"type": "cd", "name": "クールタイム短縮", "desc": "スキルの回転率が20%上昇する"}
+            {"type": "heal", "name": "HP Recovery", "desc": "Restore 5 HP"},
+            {"type": "maxhp", "name": "Max HP Increase", "desc": "Max HP +3, Restore 3 HP"},
+            {"type": "jump", "name": "Extra Jump", "desc": "Gain +1 extra jump in the air"},
+            {"type": "attack", "name": "Attack Power UP", "desc": "Increase base damage by +1"},
+            {"type": "defense", "name": "Defense Power UP", "desc": "Reduce incoming damage by 1"},
+            {"type": "speed", "name": "Movement Speed UP", "desc": "Increase move speed by 20%"},
+            {"type": "cd", "name": "Cooldown Reduction", "desc": "Increase skill cooldown speed by 20%"}
         ]
         
         # main.py内で定義されている全スキルクラス
         all_skills_classes = [MagicSwordSkill, ThunderSkill, IceEnchantSkill, FireEnchantSkill, BraveChargeSkill,
-                              HammerThrowSkill, SuperArmorSkill, EnergySkill, EarthquakeSkill, WarCrySkill,
+                              HammerThrowSkill, SuperArmorSkill, EarthquakeSkill, WarCrySkill,
                               LavaSkill, EruptionSkill, FlameDashSkill, MeteorSkill,
                               PiercingArrowSkill, MirrorSkill, WarpArrowSkill, ArrowRainSkill, PinningArrowSkill,
                               JavelinThrowSkill, VaultingStrikeSkill, RapidThrustsSkill, SweepingStrikeSkill, DragonDiveSkill,
@@ -847,10 +871,10 @@ class Character:
         # 未修得スキルを最大2つまで報酬候補に加える
         for i in range(min(2, len(unacquired))): 
             name = unacquired[i].__name__.replace("Skill", "")
-            pool.append({"type": "skill", "name": "【新スキル】", "desc": f"技「{name}」を習得する", "skill_class": unacquired[i]})
+            pool.append({"type": "skill", "name": "[New Skill]", "desc": f"Learn the skill '{name}'", "skill_class": unacquired[i]})
             
-        # プールからランダムに3つ選択して保持
-        self.current_upgrades = random.sample(pool, min(3, len(pool)))
+        # プールからランダムに選択して保持
+        self.current_upgrades = random.sample(pool, min(self.upgrade_slots, len(pool)))
 
     def apply_upgrade(self, upgrade):
         """選択された報酬をプレイヤーに適用します。スキル枠がいっぱいなら入れ替え画面へ遷移します。"""
@@ -873,8 +897,8 @@ class Character:
         elif upgrade["type"] == "skill":
             # 新しいスキルのインスタンスを作成（表示位置は仮）
             new_skill = upgrade["skill_class"](0, 15)
-            if len(self.skills) < 5:
-                # 5枠未満なら即時習得
+            if len(self.skills) < self.max_skills:
+                # 所持上限未満なら即時習得
                 self.skills.append(new_skill)
             else:
                 # 5枠埋まっている場合は入れ替え待機状態にする
@@ -907,7 +931,7 @@ class EnhancedFireSkill(Skill):
             if enemies:
                 for e in enemies:
                     if e.hp > 0 and e.x < b[0] < e.x + e.width and e.y < b[1] < e.y + e.height:
-                        if e.take_damage(2, 1 if b[2] > 0 else -1, element='fire'):
+                        if e.take_damage(2 + self.damage_bonus, 1 if b[2] > 0 else -1, element='fire'):
                             hit = True
                             break
             if hit or b[4] <= 0:
@@ -936,7 +960,7 @@ class EruptionSkill(Skill):
                 er_rect = pygame.Rect(self.pillar_x - 40, ground - 300, 80, 300)
                 for e in enemies:
                     if e.hp > 0 and er_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                        e.take_damage(1, self.source_facing, element='fire') # 毎フレーム判定なので低威力
+                        e.take_damage(1 + self.damage_bonus, self.source_facing, element='fire') # 毎フレーム判定なので低威力
     def draw_effect(self, screen):
         if self.active_timer > 0:
             # 揺らめく炎の柱
@@ -983,7 +1007,7 @@ class FlameDashSkill(Skill):
                 for e in enemies:
                     if e.hp > 0 and f_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                         e.burn_timer = 180
-                        e.take_damage(1, f[3] if len(f)>3 else 1, status_effect=True, element='fire')
+                        e.take_damage(1 + self.damage_bonus, f[3] if len(f)>3 else 1, status_effect=True, element='fire')
             if f[2] <= 0:
                 self.flames.remove(f)
     def draw_effect(self, screen):
@@ -1010,29 +1034,32 @@ class MeteorSkill(Skill):
             m[1] += m[2]
             if m[1] >= ground: # 着弾
                 if enemies:
-                    blast_rect = pygame.Rect(m[0] - 150, ground - 100, 300, 100)
+                    # 攻撃範囲を2倍に (300 -> 600)
+                    blast_rect = pygame.Rect(m[0] - 300, ground - 100, 600, 100)
                     for e in enemies:
                         if e.hp > 0 and blast_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                             # 衝撃波の向き
                             sf = 1 if e.x > m[0] else -1
-                            e.take_damage(10, sf, element='fire')
+                            e.take_damage(12 + self.damage_bonus, sf, element='fire')
+                            e.burn_timer = 180 # やけど付与
                 self.meteor = None
     def draw_effect(self, screen):
         if self.meteor:
             m = self.meteor
-            pygame.draw.circle(screen, (255, 100, 0), (int(m[0]), int(m[1])), 60)
-            pygame.draw.circle(screen, (255, 200, 50), (int(m[0]), int(m[1])), 40)
-            pygame.draw.ellipse(screen, (255, 0, 0), (int(m[0]) - 150, ground - 20, 300, 40), 2)
+            pygame.draw.circle(screen, (255, 100, 0), (int(m[0]), int(m[1])), 80) # 少し大きく
+            pygame.draw.circle(screen, (255, 200, 50), (int(m[0]), int(m[1])), 50) # 少し大きく
+            # 範囲表示を600幅に
+            pygame.draw.ellipse(screen, (255, 0, 0), (int(m[0]) - 300, ground - 20, 600, 40), 2)
         
 class Warrior(Character):
     def __init__(self, player):
         super().__init__(player)
         self.skill_throw = HammerThrowSkill(15, 15)
         self.skill_armor = SuperArmorSkill(75, 15)
-        self.skill_energy = EnergySkill(135, 15)
+        self.skill_brave_charge = BraveChargeSkill(135, 15)
         self.skill_earthquake = EarthquakeSkill(195, 15)
         self.skill_warcry = WarCrySkill(255, 15)
-        self.skills = [self.skill_throw, self.skill_armor, self.skill_energy, self.skill_earthquake, self.skill_warcry]
+        self.skills = [self.skill_throw, self.skill_armor, self.skill_brave_charge, self.skill_earthquake, self.skill_warcry]
         self.hammering = 0
         self.hit_enemies = []
 
@@ -1053,23 +1080,16 @@ class Warrior(Character):
             if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
                 self.player.vy = self.player.jump_power
                 self.player.jumpcount -= 1
-            # 固有スキルの個別発動（キー設定から取得）
-            if event.key == key_config['skill_1']: self.skill_throw.activate(self.player, enemies)
-            if event.key == key_config['skill_2']: self.skill_armor.activate(self.player, enemies)
-            if event.key == key_config['skill_3']: self.skill_energy.activate(self.player, enemies)
-            if event.key == key_config['skill_4']: self.skill_earthquake.activate(self.player, enemies)
-            if event.key == key_config['skill_5']: self.skill_warcry.activate(self.player, enemies)
+            # 固有スキルの個別発動（キー設定から取得）- 通常モードのみ
+            if not self.is_reincarnator_mode:
+                if event.key == key_config['skill_1']: self.skill_throw.activate(self.player, enemies)
+                if event.key == key_config['skill_2']: self.skill_armor.activate(self.player, enemies)
+                if event.key == key_config['skill_3']: self.skill_brave_charge.activate(self.player, enemies)
+                if event.key == key_config['skill_4']: self.skill_earthquake.activate(self.player, enemies)
+                if event.key == key_config['skill_5']: self.skill_warcry.activate(self.player, enemies)
 
     def update(self, keys, enemies, cooldown_speed):
-        # ウォークライ中は攻撃力1.5倍
-        if self.skill_warcry.active_timer > 0:
-            self.player.damage_multiplier = 1.5
-        else:
-            self.player.damage_multiplier = 1.0
-            
-        # エナジースキルの加速を反映
-        cs = 2 if self.skill_energy.active_timer > 0 else cooldown_speed
-        super().update(keys, enemies, cs)
+        super().update(keys, enemies, cooldown_speed)
         
         # ハンマーの当たり判定処理
         if self.hammering > 0:
@@ -1091,9 +1111,9 @@ class Warrior(Character):
         if self.hammering > 0:
             p_center_x = self.player.x + 20
             p_center_y = self.player.y + 20
-            progress = (25 - self.hammering) / 25.0
+            progress = (20 - self.hammering) / 20.0
             base_angle = 0 if self.player.facing == 1 else 180
-            current_angle = base_angle + (-110 + 180 * progress) * self.player.facing
+            current_angle = base_angle + (-110 + 130 * progress) * self.player.facing
             rad = math.radians(current_angle)
             dist = 70
             end_x = p_center_x + dist * math.cos(rad)
@@ -1145,11 +1165,12 @@ class Pyromancer(Character):
             if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
                 self.player.vy = self.player.jump_power
                 self.player.jumpcount -= 1
-            if event.key == key_config['skill_1']: self.skill_lava.activate(self.player, enemies)
-            if event.key == key_config['skill_2']: self.skill_enhanced.activate(self.player, enemies)
-            if event.key == key_config['skill_3']: self.skill_eruption.activate(self.player, enemies)
-            if event.key == key_config['skill_4']: self.skill_flamedash.activate(self.player, enemies)
-            if event.key == key_config['skill_5']: self.skill_meteor.activate(self.player, enemies)
+            if not self.is_reincarnator_mode:
+                if event.key == key_config['skill_1']: self.skill_lava.activate(self.player, enemies)
+                if event.key == key_config['skill_2']: self.skill_enhanced.activate(self.player, enemies)
+                if event.key == key_config['skill_3']: self.skill_eruption.activate(self.player, enemies)
+                if event.key == key_config['skill_4']: self.skill_flamedash.activate(self.player, enemies)
+                if event.key == key_config['skill_5']: self.skill_meteor.activate(self.player, enemies)
 
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
@@ -1198,7 +1219,7 @@ class JavelinThrowSkill(Skill):
                 er_rect = pygame.Rect(j[0], j[1] - 5, 40, 10)
                 for e in enemies:
                     if e.hp > 0 and e not in j[4] and er_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                        if e.take_damage(4, j[5]): # 貫通
+                        if e.take_damage(4 + self.damage_bonus, j[5]): # 貫通
                             j[4].append(e)
             if j[3] <= 0:
                 self.javelins.remove(j)
@@ -1233,7 +1254,7 @@ class VaultingStrikeSkill(Skill):
                     blast = pygame.Rect(self.player_ref.x - 40, self.player_ref.y, 120, 40)
                     for e in enemies:
                         if e.hp > 0 and blast.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            e.take_damage(3, self.source_facing)
+                            e.take_damage(3 + self.damage_bonus, self.source_facing)
     def draw_effect(self, screen):
         if self.active_timer > 0 and hasattr(self, 'player_ref') and self.player_ref:
             pygame.draw.circle(screen, (150, 255, 150), (int(self.player_ref.x+20), int(self.player_ref.y+20)), 30, 2)
@@ -1263,7 +1284,7 @@ class RapidThrustsSkill(Skill):
                     hitbox = pygame.Rect(hx, self.player_ref.y + 10, 180, 30) # 当たり判定拡大
                     for e in enemies:
                         if e.hp > 0 and hitbox.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            e.take_damage(1, self.source_facing)
+                            e.take_damage(1 + self.damage_bonus, self.source_facing)
                             # 吸い込み効果
                             pull_x = self.player_ref.x + 60 * self.player_ref.facing
                             e.x += (pull_x - e.x) * 0.2
@@ -1297,7 +1318,7 @@ class SweepingStrikeSkill(Skill):
                 hitbox = pygame.Rect(self.player_ref.x - 60, self.player_ref.y - 40, 160, 120)
                 for e in enemies:
                     if e.hp > 0 and e not in self.hit_enemies and hitbox.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                        if e.take_damage(4, self.source_facing, knockback_x=15):
+                        if e.take_damage(4 + self.damage_bonus, self.source_facing, knockback_x=15):
                             self.hit_enemies.append(e)
     def draw_effect(self, screen):
         if self.active_timer > 0 and hasattr(self, 'player_ref') and self.player_ref:
@@ -1322,18 +1343,27 @@ class DragonDiveSkill(Skill):
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
         if self.phase == 1:
+            self.player_ref.vx = 0 # 真上に上がる
             if self.player_ref.vy > -5: # 上昇終了間近
                 self.phase = 2
-                self.player_ref.vy = 50 # ダイブ速度アップ (40->50)
-                self.player_ref.vx = 35 * self.player_ref.facing # 横速度もアップ
+                self.player_ref.vy = 50 # ダイブ速度
         elif self.phase == 2:
+            # 急降下中に左右操作可能
+            keys = pygame.key.get_pressed()
+            move_speed = 10
+            if keys[key_config['move_left']]:
+                self.player_ref.x -= move_speed
+            if keys[key_config['move_right']]:
+                self.player_ref.x += move_speed
+                
             if self.player_ref.y >= ground:
                 self.phase = 0
                 if enemies:
-                    blast = pygame.Rect(self.player_ref.x - 100, self.player_ref.y - 50, 240, 100)
+                    # 地面衝突時に周囲にダメージ
+                    blast = pygame.Rect(self.player_ref.x - 120, self.player_ref.y - 60, 280, 110)
                     for e in enemies:
                         if e.hp > 0 and blast.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            e.take_damage(8, self.source_facing, knockback_y=-15, element='heavy')
+                            e.take_damage(10 + self.damage_bonus, self.source_facing, knockback_y=-15, element='heavy')
     def draw_effect(self, screen):
         if (self.phase == 1 or self.phase == 2) and hasattr(self, 'player_ref') and self.player_ref:
             pygame.draw.circle(screen, (100, 255, 255), (int(self.player_ref.x+20), int(self.player_ref.y+20)), 25)
@@ -1368,11 +1398,12 @@ class Lancer(Character):
             if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
                 self.player.vy = self.player.jump_power
                 self.player.jumpcount -= 1
-            if event.key == key_config['skill_1']: self.skill_javelin.activate(self.player, enemies)
-            if event.key == key_config['skill_2']: self.skill_vault.activate(self.player, enemies)
-            if event.key == key_config['skill_3']: self.skill_rapid.activate(self.player, enemies)
-            if event.key == key_config['skill_4']: self.skill_sweep.activate(self.player, enemies)
-            if event.key == key_config['skill_5']: self.skill_dragondive.activate(self.player, enemies)
+            if not self.is_reincarnator_mode:
+                if event.key == key_config['skill_1']: self.skill_javelin.activate(self.player, enemies)
+                if event.key == key_config['skill_2']: self.skill_vault.activate(self.player, enemies)
+                if event.key == key_config['skill_3']: self.skill_rapid.activate(self.player, enemies)
+                if event.key == key_config['skill_4']: self.skill_sweep.activate(self.player, enemies)
+                if event.key == key_config['skill_5']: self.skill_dragondive.activate(self.player, enemies)
 
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
@@ -1429,28 +1460,19 @@ class Swordsman(Character):
             if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
                 self.player.vy = self.player.jump_power
                 self.player.jumpcount -= 1
-            if event.key == key_config['skill_1']: self.skill_dash_strike.activate(self.player, enemies)
-            if event.key == key_config['skill_2']: self.skill_rising_strike.activate(self.player, enemies)
-            if event.key == key_config['skill_3']: self.skill_fire.activate(self.player, enemies)
-            if event.key == key_config['skill_4']: self.skill_brave_charge.activate(self.player, enemies)
-            if event.key == key_config['skill_5']: self.skill_gravity.activate(self.player, enemies)
+            if not self.is_reincarnator_mode:
+                if event.key == key_config['skill_1']: self.skill_dash_strike.activate(self.player, enemies)
+                if event.key == key_config['skill_2']: self.skill_rising_strike.activate(self.player, enemies)
+                if event.key == key_config['skill_3']: self.skill_fire.activate(self.player, enemies)
+                if event.key == key_config['skill_4']: self.skill_brave_charge.activate(self.player, enemies)
+                if event.key == key_config['skill_5']: self.skill_gravity.activate(self.player, enemies)
 
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
-        
-        # Brave Chargeのバフ適用
-        if self.skill_brave_charge.active_timer > 0:
-            self.player.damage_multiplier = 2
-            self.player.move_speed = 2.0
-            self.player.jump_power = -20
-        else:
-            self.player.damage_multiplier = 1
-            self.player.move_speed = 1.2
-            self.player.jump_power = -15
             
         # 固有スキルの更新（重力などプレイヤー全体に影響するもの）
-        if self.skill_gravity.range > 0:
-            self.player.vy += 0.3 # 上書きではなく追加の重力軽減効果として扱う場合は調整が必要。Player.update側で処理されているためここではパス
+        if self.skill_gravity in self.skills and self.skill_gravity.range > 0:
+            # Player.update側で重力軽減が処理されているが、ここでも補足可能
             pass
 
     def draw_effects(self, screen):
@@ -1484,46 +1506,55 @@ class Archer(Character):
                 by = self.player.y + 20
                 self.bombs.append([bx, by, 15, self.player.facing]) # 15フレームの爆発
             
-            # PiercingArrowのエイム中処理
-            if self.skill_pierce.aiming:
+            # PiercingArrowのエイム中処理（スキルを所持している場合）
+            pierce_skill = next((s for s in self.skills if isinstance(s, PiercingArrowSkill)), None)
+            if pierce_skill and pierce_skill.aiming:
                 if event.key == key_config['skill_1']: 
-                    self.skill_pierce.activate(self.player, enemies) # 発射
+                    pierce_skill.activate(self.player, enemies) # 発射
                 elif event.key == key_config['jump']:
-                    self.skill_pierce.aim_angle -= 15 * self.player.facing
+                    pierce_skill.aim_angle -= 15 * self.player.facing
                 elif event.key == pygame.K_DOWN or event.key == pygame.K_s:
-                    self.skill_pierce.aim_angle += 15 * self.player.facing
+                    pierce_skill.aim_angle += 15 * self.player.facing
             else:
                 if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
                     self.player.vy = self.player.jump_power
                     self.player.jumpcount -= 1
-                if event.key == key_config['skill_1']: self.skill_pierce.activate(self.player, enemies)
-                if event.key == key_config['skill_2']: self.skill_mirror.activate(self.player, enemies)
-                if event.key == key_config['skill_3']: self.skill_warp.activate(self.player, enemies)
-                if event.key == key_config['skill_4']: self.skill_rain.activate(self.player, enemies)
-                if event.key == key_config['skill_5']: self.skill_pin.activate(self.player, enemies)
+                if not self.is_reincarnator_mode:
+                    if event.key == key_config['skill_1']: self.skill_pierce.activate(self.player, enemies)
+                    if event.key == key_config['skill_2']: self.skill_mirror.activate(self.player, enemies)
+                    if event.key == key_config['skill_3']: self.skill_warp.activate(self.player, enemies)
+                    if event.key == key_config['skill_4']: self.skill_rain.activate(self.player, enemies)
+                    if event.key == key_config['skill_5']: self.skill_pin.activate(self.player, enemies)
 
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
         
-        # ボムの更新と当たり判定
-        new_bombs = []
-        for b in self.bombs:
-            b[2] -= 1
-            if b[2] > 0:
+        # ボムの更新と爆発判定
+        for b in self.bombs[:]:
+            b[2] -= 1 # タイマー減少
+            if b[2] <= 0:
+                # 爆発
                 if enemies:
-                    bomb_rect = pygame.Rect(b[0] - 40, b[1] - 40, 80, 80)
+                    blast_rect = pygame.Rect(b[0] - 60, b[1] - 40, 120, 80)
                     for e in enemies:
-                        if e.hp > 0 and bomb_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            e.take_damage(1, b[3]) # 1フレームごとに判定されるため、多段ヒットする。無敵時間で1回ダメージ
-                new_bombs.append(b)
-        self.bombs = new_bombs
+                        if e.hp > 0 and blast_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+                            e.take_damage(4, b[3], element='fire') # ダメージ調整
+                self.bombs.remove(b)
 
     def draw_effects(self, screen):
         super().draw_effects(screen)
-        
+        # ボムと爆発の描画
         for b in self.bombs:
-            pygame.draw.circle(screen, (255, 100, 0), (int(b[0]), int(b[1])), 40)
-            pygame.draw.circle(screen, (255, 255, 0), (int(b[0]), int(b[1])), 30)
+            if b[2] > 5: # 設置中
+                pygame.draw.circle(screen, (30, 30, 30), (int(b[0]), int(b[1])), 10) # 色を濃く
+                pygame.draw.circle(screen, (255, 50, 50), (int(b[0]), int(b[1])), 5)
+            else: # 爆発
+                # 爆発エフェクトを派手に
+                radius = 60 - b[2]*4
+                alpha = 150 + b[2]*10
+                surf = pygame.Surface((radius*2, radius*2), pygame.SRCALPHA)
+                pygame.draw.circle(surf, (255, 150, 50, alpha), (radius, radius), radius)
+                screen.blit(surf, (int(b[0]-radius), int(b[1]-radius)))
 
 class MagicSwordsman(Character):
     def __init__(self, player):
@@ -1541,36 +1572,25 @@ class MagicSwordsman(Character):
             if event.key == key_config['attack']:
                 self.player.swording = 12
                 # MagicSword発動中なら魔法波を射出
-                if self.skill_magic_sword.active_timer > 0:
-                    self.skill_magic_sword.launch_wave(self.player)
+                ms_skill = next((s for s in self.skills if isinstance(s, MagicSwordSkill)), None)
+                if ms_skill and ms_skill.active_timer > 0:
+                    ms_skill.launch_wave(self.player)
             if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
                 self.player.vy = self.player.jump_power
                 self.player.jumpcount -= 1
-            if event.key == key_config['skill_1']: self.skill_magic_sword.activate(self.player, enemies)
-            if event.key == key_config['skill_2']: self.skill_thunder.activate(self.player, enemies)
-            if event.key == key_config['skill_3']: self.skill_ice_enchant.activate(self.player, enemies)
-            if event.key == key_config['skill_4']: self.skill_fire_enchant.activate(self.player, enemies)
-            if event.key == key_config['skill_5']: self.skill_brave_charge.activate(self.player, enemies)
+            if not self.is_reincarnator_mode:
+                if event.key == key_config['skill_1']: self.skill_magic_sword.activate(self.player, enemies)
+                if event.key == key_config['skill_2']: self.skill_thunder.activate(self.player, enemies)
+                if event.key == key_config['skill_3']: self.skill_ice_enchant.activate(self.player, enemies)
+                if event.key == key_config['skill_4']: self.skill_fire_enchant.activate(self.player, enemies)
+                if event.key == key_config['skill_5']: self.skill_brave_charge.activate(self.player, enemies)
 
     def on_sword_hit(self, enemy, source_facing):
-        # エンチャント効果の適用
-        if self.skill_ice_enchant.active_timer > 0:
-            enemy.frozen_timer = 120 # 2秒間凍結
-        if self.skill_fire_enchant.active_timer > 0:
-            enemy.burn_timer = 180 # 3秒間やけど
-            enemy.take_damage(1, source_facing, status_effect=True, element='fire') # 炎の追加ダメージ
+        # 基底クラスのon_sword_hit（self.skillsリストからエンチャントを汎用検出）
+        super().on_sword_hit(enemy, source_facing)
             
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
-        # Brave Chargeのバフ適用
-        if self.skill_brave_charge.active_timer > 0:
-            self.player.damage_multiplier = 2
-            self.player.move_speed = 2.0
-            self.player.jump_power = -20
-        else:
-            self.player.damage_multiplier = 1
-            self.player.move_speed = 1.2
-            self.player.jump_power = -15
 
     def draw_effects(self, screen):
         super().draw_effects(screen)
@@ -1687,7 +1707,7 @@ class RoarSkill(Skill):
             py = self._player_ref.y + 20
             r = int((15 - self.roar_effect) / 15 * 200)
             alpha = int(self.roar_effect / 15 * 150)
-            if r > 0:
+            if r >= 4:
                 surf = pygame.Surface((r*2+2, r*2+2), pygame.SRCALPHA)
                 pygame.draw.circle(surf, (255, 200, 50, alpha), (r+1, r+1), r, 4)
                 screen.blit(surf, (int(px)-r-1, int(py)-r-1))
@@ -1724,6 +1744,7 @@ class RampageSkill(Skill):
             base_duration = 180
             duration_per_ampule = 30
             self.active_timer = base_duration + amps * duration_per_ampule
+            self.initial_duration = self.active_timer
             
             player._monster_rampage = self.active_timer
             
@@ -1772,16 +1793,17 @@ class MonsterBeta(Character):
             if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
                 self.player.vy = self.player.jump_power
                 self.player.jumpcount -= 1
-            if event.key == key_config['skill_1']:
-                self.skill_pounce.activate(self.player, enemies)
-            if event.key == key_config['skill_2']:
-                self.skill_scale.activate(self.player, enemies)
-            if event.key == key_config['skill_3']:
-                self.skill_roar.activate(self.player, enemies)
-            if event.key == key_config['skill_4']:
-                self.skill_ampule.activate(self.player, enemies)
-            if event.key == key_config['skill_5']:
-                self.skill_rampage.activate(self.player, enemies)
+            if not self.is_reincarnator_mode:
+                if event.key == key_config['skill_1']:
+                    self.skill_pounce.activate(self.player, enemies)
+                if event.key == key_config['skill_2']:
+                    self.skill_scale.activate(self.player, enemies)
+                if event.key == key_config['skill_3']:
+                    self.skill_roar.activate(self.player, enemies)
+                if event.key == key_config['skill_4']:
+                    self.skill_ampule.activate(self.player, enemies)
+                if event.key == key_config['skill_5']:
+                    self.skill_rampage.activate(self.player, enemies)
 
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
@@ -2286,7 +2308,8 @@ class Enemy:
             # 召喚エフェクト
             radius = int((60 - self.spawn_timer % 60) * 0.5)
             pygame.draw.ellipse(screen, (255, 255, 100), (self.x - 20, ground - 10, self.width + 40, 20), 2)
-            pygame.draw.circle(screen, (255, 255, 200), (int(self.x + self.width//2), ground), radius, 1)
+            if radius >= 1:
+                pygame.draw.circle(screen, (255, 255, 200), (int(self.x + self.width//2), ground), radius, 1)
             pygame.draw.line(screen, (255, 255, 100), (self.x + self.width//2, ground), (self.x + self.width//2, self.y - 100 + self.spawn_timer), 2)
             return
         draw_color = self.color
@@ -2697,6 +2720,115 @@ class SniperEnemy(Enemy):
         cy = int(self.y + self.height // 2)
         pygame.draw.circle(screen, (255, 255, 100), (cx, cy), 4)
 
+class BlockGolemBoss(Enemy):
+    """
+    Wave 5ごとに出現する巨大ボス。
+    HPが高く、ジャンププレス、拡散弾、防御シールドを使用する。
+    """
+    def __init__(self, x, y, hp=100, attack_damage=2):
+        super().__init__(x, y, hp, (218, 165, 32), 'boss', attack_damage) # Goldenrod color
+        self.width, self.height = 100, 100
+        self.max_hp = hp
+        self.speed = 1.5
+        self.shield_timer = 0
+        self.action_timer = 0
+        self.current_action = None # 'jump', 'shoot', 'shield'
+        self.shockwave_timer = 0
+
+    def _update_physics(self):
+        # 重力適用
+        if self.y < ground - self.height:
+            self.vy += 0.8
+        elif self.vy > 0:
+            self.vy = 0
+            self.y = ground - self.height
+            # 着地時に衝撃波判定
+            if self.current_action == 'jump':
+                self.shockwave_timer = 30
+                self.current_action = None
+
+        self.y += self.vy
+        self.x += self.vx
+        self.vx *= 0.95
+
+    def _update_behavior(self, player):
+        if self.shield_timer > 0: self.shield_timer -= 1
+        if self.shockwave_timer > 0:
+            self.shockwave_timer -= 1
+            # 衝撃波ダメージ（プレイヤーが地上にいる場合のみ）
+            if player.y + player.height >= ground - 5:
+                dist = abs((self.x + self.width // 2) - (player.x + player.width // 2))
+                if dist < 300:
+                    sf = 1 if player.x > self.x else -1
+                    player.take_damage(self.attack_damage, sf)
+
+        if self.action_timer > 0:
+            self.action_timer -= 1
+            if self.current_action == 'shoot' and self.action_timer % 20 == 0:
+                # 拡散弾
+                for angle in [-0.2, 0, 0.2]:
+                    base_angle = math.atan2(player.y - self.y, player.x - self.x)
+                    enemy_bullets.append(EnemyBullet(self.x + 50, self.y + 50, base_angle + angle, self.attack_damage))
+            return
+
+        # 次の行動を選択
+        r = random.random()
+        if r < 0.3: # ジャンプ
+            self.current_action = 'jump'
+            self.vy = -25
+            self.vx = (1 if player.x > self.x else -1) * 10
+            self.action_timer = 120
+        elif r < 0.6: # 射撃
+            self.current_action = 'shoot'
+            self.action_timer = 60
+        elif r < 0.8: # シールド
+            self.current_action = 'shield'
+            self.shield_timer = 120
+            self.action_timer = 150
+        else: # 移動
+            self.facing = 1 if player.x > self.x else -1
+            self.vx = self.facing * 5
+            self.action_timer = 60
+
+        # 接触ダメージ
+        if player.x < self.x + self.width and self.x < player.x + player.width and \
+           player.y < self.y + self.height and self.y < player.y + player.height:
+            player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
+
+    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None):
+        if self.shield_timer > 0:
+            damage = max(1, damage // 5) # シールド中は80%軽減
+        # ボスはノックバックしにくい
+        return super().take_damage(damage, source_facing, knockback_x * 0.2, knockback_y * 0.2, status_effect, element)
+
+    def draw(self, screen):
+        if self.hp <= 0:
+            super().draw(screen)
+            return
+        
+        # ボス本体
+        color = self.color
+        if self.hit_timer > 0: color = (255, 255, 255)
+        elif self.shield_timer > 0: color = (200, 200, 255) # 青白く光る
+        
+        pygame.draw.rect(screen, color, (int(self.x), int(self.y), self.width, self.height))
+        # 模様
+        pygame.draw.rect(screen, (0, 0, 0), (int(self.x), int(self.y), self.width, self.height), 2)
+        pygame.draw.rect(screen, (0, 0, 0), (int(self.x + 20), int(self.y + 20), 60, 60), 1)
+        
+        # HPバー
+        bar_w = 400
+        bar_h = 20
+        pygame.draw.rect(screen, (50, 50, 50), (width // 2 - bar_w // 2, 20, bar_w, bar_h))
+        hp_ratio = max(0, self.hp / self.max_hp)
+        pygame.draw.rect(screen, (255, 0, 0), (width // 2 - bar_w // 2, 20, int(bar_w * hp_ratio), bar_h))
+        pygame.draw.rect(screen, (255, 255, 255), (width // 2 - bar_w // 2, 20, bar_w, bar_h), 2)
+        
+        # 衝撃波エフェクト
+        if self.shockwave_timer > 0:
+            r = int((30 - self.shockwave_timer) * 10)
+            pygame.draw.ellipse(screen, (255, 255, 200), (self.x + 50 - r, ground - 20, r * 2, 40), 2)
+
 player = Player()
 enemies = []
 enemy_bullets = []
@@ -2709,11 +2841,20 @@ def start_next_wave():
     enemies = []
     enemy_bullets = [] # 前のWaveの弾を消去
     
+    # 転生者モードのみボスが出現するように制限
+    is_reincarnMode = getattr(player.character, 'is_reincarnator_mode', False)
+    
+    # Boss Wave Check
+    if is_reincarnMode and wave_number > 0 and wave_number % 5 == 0:
+        boss_hp = 60 + (wave_number // 5 - 1) * 40 # 100+80n -> 60+40n
+        boss_atk = 2 + (wave_number // 5 - 1)
+        enemies.append(BlockGolemBoss(width // 2 - 50, ground - 100, hp=boss_hp, attack_damage=boss_atk))
+        return
+
     # Wave 1 は 2体。2 Wave ごとに 1体ずつ増え、最大8体
     num_enemies = min(2 + wave_number // 2, 8)
     
     # 転生者モード以外は強化速度半減
-    is_reincarnMode = getattr(player.character, 'is_reincarnator_mode', False)
     
     # 敵の強化計算（Wave20以降は2waveおき、Wave40以降は1waveおき）
     if wave_number < 20:
@@ -2850,9 +2991,6 @@ async def main():
                             # Apply reincarnator mode flag to the new character
                             if player.character:
                                 player.character.is_reincarnator_mode = player.reincarnator_mode
-                                if player.character.is_reincarnator_mode:
-                                    player.character.skills = [] # Start fresh with 0 skills
-                                    player.skills = []
 
                             # プレイヤー位置などをリセットし、戦闘開始
                             player.x, player.y = 400, 350
@@ -2906,7 +3044,8 @@ async def main():
                     scale = 0.6
                     card_w, card_h = int(280 * scale), int(420 * scale)
                     spacing = 50
-                    total_w = 3 * card_w + 2 * spacing
+                    num_upgrades = len(player.character.current_upgrades) if hasattr(player.character, 'current_upgrades') else 3
+                    total_w = num_upgrades * card_w + (num_upgrades - 1) * spacing
                     start_x = (width - total_w) // 2
                     start_y = height // 2 - card_h // 2
                     
@@ -2925,6 +3064,37 @@ async def main():
                     # 報酬をスキップ
                     start_next_wave()
                     game_state = STATE_PLAYING
+
+            elif game_state == STATE_BOSS_REWARD:
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    mx, my = pygame.mouse.get_pos()
+                    scale = 0.7
+                    card_w, card_h = int(280 * scale), int(420 * scale)
+                    spacing = 50
+                    total_w = 3 * card_w + 2 * spacing
+                    start_x = (width - total_w) // 2
+                    start_y = height // 2 - card_h // 2
+                    
+                    for i in range(3):
+                        rect = pygame.Rect(start_x + i * (card_w + spacing), start_y, card_w, card_h)
+                        if rect.collidepoint(mx, my):
+                            # 報酬適用
+                            if i == 0: # アップグレード枠増加
+                                player.character.upgrade_slots += 1
+                            elif i == 1: # スキル進化
+                                # TODO: スキル選択画面へ？とりあえず全スキル+3するか、ランダムか。
+                                # ユーザー要望は「スキル1つ進化」なので、簡易的に所持スキルのうちランダム1つを強化
+                                if player.character.skills:
+                                    s = random.choice(player.character.skills)
+                                    s.damage_bonus += 3
+                            elif i == 2: # 英雄の加護
+                                player.max_hp += 10
+                                player.hp = player.max_hp
+                                player.defense += 1
+                            
+                            start_next_wave()
+                            game_state = STATE_PLAYING
+                            break
 
             elif game_state == STATE_REPLACE_SKILL:
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -3017,10 +3187,16 @@ async def main():
                     else:
                         wave_clear_timer -= 1
                         if wave_clear_timer == 1:
-                            if getattr(player.character, 'is_reincarnator_mode', False):
-                                player.character.generate_upgrades()
-                                game_state = STATE_UPGRADE
-                                wave_clear_timer = 0
+                            is_reincarn = player.character and getattr(player.character, 'is_reincarnator_mode', False)
+                            if is_reincarn:
+                                if wave_number > 0 and wave_number % 5 == 0:
+                                    # ボス撃破後の特別報酬へ
+                                    game_state = STATE_BOSS_REWARD
+                                    wave_clear_timer = 0
+                                else:
+                                    player.character.generate_upgrades()
+                                    game_state = STATE_UPGRADE
+                                    wave_clear_timer = 0
                             else:
                                 start_next_wave()
                                 wave_clear_timer = 0
@@ -3082,7 +3258,8 @@ async def main():
                 elif is_hovered:
                     bg_color = (70, 70, 90)
                 else:
-                    bg_color = (40, 40, 55)
+                    bg_color = (40, 40, 50)
+                
                 pygame.draw.rect(screen, bg_color, (350, y, 500, 38), border_radius=5)
                 pygame.draw.rect(screen, (100, 100, 120), (350, y, 500, 38), 1, border_radius=5)
             
@@ -3098,6 +3275,51 @@ async def main():
         
             hint = font_settings_footer.render("Click to select, press key to rebind. ESC to return.", True, (160, 160, 180))
             screen.blit(hint, (width // 2 - hint.get_width() // 2, height - 50))
+
+        elif game_state in [STATE_UPGRADE, STATE_BOSS_REWARD]:
+            overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 180))
+            screen.blit(overlay, (0, 0))
+            
+            title_text = "BOSS CLEAR REWARD" if game_state == STATE_BOSS_REWARD else "WAVE CLEAR REWARD"
+            title_s = font_settings_title.render(title_text, True, (255, 215, 0))
+            screen.blit(title_s, (width // 2 - title_s.get_width() // 2, 80))
+            
+            scale = 0.7
+            card_w, card_h = int(280 * scale), int(420 * scale)
+            spacing = 50
+            
+            rewards = []
+            if game_state == STATE_BOSS_REWARD:
+                rewards = [
+                    {"name": "Choice Slot+", "desc": "Normal upgrade choices +1", "color": (100, 200, 255)},
+                    {"name": "Evolution", "desc": "One skill Damage +3", "color": (255, 100, 100)},
+                    {"name": "Hero's Blessing", "desc": "Max HP+10, Heal, Def+1", "color": (255, 215, 0)}
+                ]
+            else:
+                if hasattr(player.character, 'current_upgrades'):
+                    for upg in player.character.current_upgrades:
+                        rewards.append({"name": upg["name"], "desc": upg["desc"], "color": (200, 200, 200)})
+            
+            total_w = len(rewards) * card_w + (len(rewards) - 1) * spacing
+            start_x = (width - total_w) // 2
+            start_y = height // 2 - card_h // 2
+            
+            for i, r in enumerate(rewards):
+                rx = start_x + i * (card_w + spacing)
+                ry = start_y
+                rect = pygame.Rect(rx, ry, card_w, card_h)
+                
+                # カード背景
+                pygame.draw.rect(screen, (40, 40, 60), rect, border_radius=15)
+                pygame.draw.rect(screen, r["color"], rect, 3, border_radius=15)
+                
+                # テキスト
+                name_s = font_upgrade_name.render(r["name"], True, (255, 255, 255))
+                desc_s = font_upgrade_desc.render(r["desc"], True, (200, 200, 200))
+                screen.blit(name_s, (rx + 15, ry + 30))
+                # 改行対応は簡易的に
+                screen.blit(desc_s, (rx + 15, ry + 120))
 
         elif game_state == STATE_PAUSED:
             overlay = pygame.Surface((width, height), pygame.SRCALPHA)
