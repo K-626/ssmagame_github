@@ -49,6 +49,20 @@ KEY_ACTION_NAMES = {
 
 game_state = STATE_LOBBY
 
+# --- スマートフォン・タッチ操作用設定 ---
+smartphone_mode = False
+active_fingers = {} # finger_id -> (last_x, last_y)
+touch_keys = {
+    'left': False, 'right': False, 'up': False, 'attack': False
+}
+# 仮想ボタンの配置 (1200x600想定)
+V_PAD = {
+    'left': pygame.Rect(40, 460, 100, 100),
+    'right': pygame.Rect(180, 460, 100, 100),
+    'up': pygame.Rect(110, 340, 100, 100),
+    'attack': pygame.Rect(950, 400, 200, 160)
+}
+
 # 反発係数 (衝突分離用)
 PUSH_FORCE = 0.5 
 
@@ -794,6 +808,7 @@ class Character:
         for s in self.skills:
             s.draw_effect(screen)
     def draw_ui(self, screen):
+        # ... (中略)
         SKILL_NAMES = {
             'MagicSwordSkill': '魔法剣', 'ThunderSkill': '雷', 'IceEnchantSkill': '氷付与',
             'FireEnchantSkill': '炎付与', 'BraveChargeSkill': '突撃', 'HammerThrowSkill': '投げ槌',
@@ -811,7 +826,6 @@ class Character:
             'RoarSkill': '咆哮', 'AmpuleSkill': 'アンプル', 'RampageSkill': '暴走',
         }
         skill_keys = ['J', 'K', 'L', 'N', 'M']
-        # UI用にスキル名を日本語で表示（クラス変数でキャッシュして毎フレームの負荷を軽減）
         if not hasattr(Character, '_font_sm') or Character._font_sm is None:
             jp_fonts = ['msgothic', 'yugothic', 'meiryo', 'msuigothic', 'arial']
             Character._font_sm = None
@@ -822,20 +836,28 @@ class Character:
                 except: continue
             if not Character._font_sm: Character._font_sm = pygame.font.SysFont(None, 14)
         font_sm = Character._font_sm
-        # UI用にスキル位置を自動調整
         for i, s in enumerate(self.skills):
             s.x = 15 + i * 60
             s.y = 15
             s.draw(screen)
-            # キーと名前の表示
             if i < len(skill_keys):
                 ks = font_sm.render(skill_keys[i], True, (255, 255, 0))
                 screen.blit(ks, (s.x + 2, s.y - 14))
-            
             cls_name = type(s).__name__
             disp_name = SKILL_NAMES.get(cls_name, cls_name.replace('Skill', ''))
             ns = font_sm.render(disp_name, True, (255, 255, 255))
             screen.blit(ns, (s.x, s.y + 52))
+
+    def attack(self, enemies):
+        """通常攻撃を実行（スマホ/キーボード共通）"""
+        self.player.swording = 12
+
+    def handle_event(self, event, enemies):
+        """入力イベントの処理"""
+        if event.type == pygame.KEYDOWN:
+            if event.key == key_config['attack']:
+                self.attack(enemies)
+
 
     def update_timers(self): pass
     def get_max_hp(self): return 10
@@ -1015,6 +1037,7 @@ class FlameDashSkill(Skill):
             c = min(255, max(0, int(f[2] / 75 * 255)))
             pygame.draw.rect(screen, (255, c, 0), (int(f[0]), int(f[1]) + 20, 40, 20))
 
+
 class MeteorSkill(Skill):
     def __init__(self, x, y):
         super().__init__(x, y, 600, (255, 60, 60), (150, 0, 0))
@@ -1070,13 +1093,15 @@ class Warrior(Character):
     def get_jump_power(self):
         return -12 # ジャンプ低い
 
+    def attack(self, enemies):
+        if self.hammering == 0:
+            self.hammering = 20 # 打撃の振り下ろしフレーム（15から10へ高速化）
+            self.hit_enemies = []
+
     def handle_event(self, event, enemies):
         """戦士の入力イベント処理（基本攻撃とスキルの個別発動）"""
-        super().handle_event(event, enemies) # J,K,L,N,Mキーの共通処理
+        super().handle_event(event, enemies)
         if event.type == pygame.KEYDOWN:
-            if event.key == key_config['attack'] and self.hammering == 0:
-                self.hammering = 20 # 打撃の振り下ろしフレーム（15から10へ高速化）
-                self.hit_enemies = []
             if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
                 self.player.vy = self.player.jump_power
                 self.player.jumpcount -= 1
@@ -1087,6 +1112,7 @@ class Warrior(Character):
                 if event.key == key_config['skill_3']: self.skill_brave_charge.activate(self.player, enemies)
                 if event.key == key_config['skill_4']: self.skill_earthquake.activate(self.player, enemies)
                 if event.key == key_config['skill_5']: self.skill_warcry.activate(self.player, enemies)
+
 
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
@@ -1155,13 +1181,14 @@ class Pyromancer(Character):
     def get_jump_power(self):
         return -14
 
+    def attack(self, enemies):
+        # 通常攻撃：ファイアボール
+        vx = 20 * self.player.facing
+        self.fireballs.append([self.player.x + 20, self.player.y + 20, vx, 40, self.player.facing]) # Add player.facing
+
     def handle_event(self, event, enemies):
         super().handle_event(event, enemies)
         if event.type == pygame.KEYDOWN:
-            if event.key == key_config['attack']:
-                # 通常攻撃：ファイアボール
-                vx = 20 * self.player.facing
-                self.fireballs.append([self.player.x + 20, self.player.y + 20, vx, 40, self.player.facing]) # Add player.facing
             if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
                 self.player.vy = self.player.jump_power
                 self.player.jumpcount -= 1
@@ -1171,6 +1198,7 @@ class Pyromancer(Character):
                 if event.key == key_config['skill_3']: self.skill_eruption.activate(self.player, enemies)
                 if event.key == key_config['skill_4']: self.skill_flamedash.activate(self.player, enemies)
                 if event.key == key_config['skill_5']: self.skill_meteor.activate(self.player, enemies)
+
 
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
@@ -1389,12 +1417,14 @@ class Lancer(Character):
     def get_jump_power(self):
         return -18
 
+    def attack(self, enemies):
+        if self.thrusting == 0:
+            self.thrusting = 15 # 高速突き
+            self.hit_enemies = []
+
     def handle_event(self, event, enemies):
         super().handle_event(event, enemies)
         if event.type == pygame.KEYDOWN:
-            if event.key == key_config['attack'] and self.thrusting == 0:
-                self.thrusting = 15 # 高速突き
-                self.hit_enemies = []
             if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
                 self.player.vy = self.player.jump_power
                 self.player.jumpcount -= 1
@@ -1404,6 +1434,7 @@ class Lancer(Character):
                 if event.key == key_config['skill_3']: self.skill_rapid.activate(self.player, enemies)
                 if event.key == key_config['skill_4']: self.skill_sweep.activate(self.player, enemies)
                 if event.key == key_config['skill_5']: self.skill_dragondive.activate(self.player, enemies)
+
 
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
@@ -1455,8 +1486,6 @@ class Swordsman(Character):
     def handle_event(self, event, enemies):
         super().handle_event(event, enemies)
         if event.type == pygame.KEYDOWN:
-            if event.key == key_config['attack']:
-                self.player.swording = 12
             if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
                 self.player.vy = self.player.jump_power
                 self.player.jumpcount -= 1
@@ -1466,6 +1495,7 @@ class Swordsman(Character):
                 if event.key == key_config['skill_3']: self.skill_fire.activate(self.player, enemies)
                 if event.key == key_config['skill_4']: self.skill_brave_charge.activate(self.player, enemies)
                 if event.key == key_config['skill_5']: self.skill_gravity.activate(self.player, enemies)
+
 
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
@@ -1497,15 +1527,15 @@ class Archer(Character):
     def get_jump_power(self):
         return -15
 
+    def attack(self, enemies):
+        # ボム攻撃 (クールタイムなしだが同時存在数制限など設けても良い)
+        bx = self.player.x + 60 * self.player.facing
+        by = self.player.y + 20
+        self.bombs.append([bx, by, 15, self.player.facing]) # 15フレームの爆発
+
     def handle_event(self, event, enemies):
         super().handle_event(event, enemies)
         if event.type == pygame.KEYDOWN:
-            if event.key == key_config['attack']:
-                # ボム攻撃 (クールタイムなしだが同時存在数制限など設けても良い)
-                bx = self.player.x + 60 * self.player.facing
-                by = self.player.y + 20
-                self.bombs.append([bx, by, 15, self.player.facing]) # 15フレームの爆発
-            
             # PiercingArrowのエイム中処理（スキルを所持している場合）
             pierce_skill = next((s for s in self.skills if isinstance(s, PiercingArrowSkill)), None)
             if pierce_skill and pierce_skill.aiming:
@@ -1525,6 +1555,7 @@ class Archer(Character):
                     if event.key == key_config['skill_3']: self.skill_warp.activate(self.player, enemies)
                     if event.key == key_config['skill_4']: self.skill_rain.activate(self.player, enemies)
                     if event.key == key_config['skill_5']: self.skill_pin.activate(self.player, enemies)
+
 
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
@@ -1566,15 +1597,16 @@ class MagicSwordsman(Character):
         self.skill_brave_charge = BraveChargeSkill(255, 15)
         self.skills = [self.skill_magic_sword, self.skill_thunder, self.skill_ice_enchant, self.skill_fire_enchant, self.skill_brave_charge]
 
+    def attack(self, enemies):
+        self.player.swording = 12
+        # MagicSword発動中なら魔法波を射出
+        ms_skill = next((s for s in self.skills if isinstance(s, MagicSwordSkill)), None)
+        if ms_skill and ms_skill.active_timer > 0:
+            ms_skill.launch_wave(self.player)
+
     def handle_event(self, event, enemies):
         super().handle_event(event, enemies)
         if event.type == pygame.KEYDOWN:
-            if event.key == key_config['attack']:
-                self.player.swording = 12
-                # MagicSword発動中なら魔法波を射出
-                ms_skill = next((s for s in self.skills if isinstance(s, MagicSwordSkill)), None)
-                if ms_skill and ms_skill.active_timer > 0:
-                    ms_skill.launch_wave(self.player)
             if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
                 self.player.vy = self.player.jump_power
                 self.player.jumpcount -= 1
@@ -1584,6 +1616,7 @@ class MagicSwordsman(Character):
                 if event.key == key_config['skill_3']: self.skill_ice_enchant.activate(self.player, enemies)
                 if event.key == key_config['skill_4']: self.skill_fire_enchant.activate(self.player, enemies)
                 if event.key == key_config['skill_5']: self.skill_brave_charge.activate(self.player, enemies)
+
 
     def on_sword_hit(self, enemy, source_facing):
         # 基底クラスのon_sword_hit（self.skillsリストからエンチャントを汎用検出）
@@ -1784,12 +1817,14 @@ class MonsterBeta(Character):
     def get_speed(self): return 1.5
     def get_jump_power(self): return -16
 
+    def attack(self, enemies):
+        if self.scratch_timer == 0:
+            self.scratch_timer = 8
+            self.hit_enemies = []
+
     def handle_event(self, event, enemies):
         super().handle_event(event, enemies)
         if event.type == pygame.KEYDOWN:
-            if event.key == key_config['attack'] and self.scratch_timer == 0:
-                self.scratch_timer = 8
-                self.hit_enemies = []
             if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
                 self.player.vy = self.player.jump_power
                 self.player.jumpcount -= 1
@@ -1804,6 +1839,7 @@ class MonsterBeta(Character):
                     self.skill_ampule.activate(self.player, enemies)
                 if event.key == key_config['skill_5']:
                     self.skill_rampage.activate(self.player, enemies)
+
 
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
@@ -1912,6 +1948,8 @@ class Player:
         self.bonus_damage = 0         # アップグレードによる追加ダメージ
         self.cooldown_speed_mult = 1.0 # クールタイム短縮倍率
         self.hit_timer = 0            # 被弾時のノックバック/点滅タイマー
+        self.prev_touch_up = False    # スマホモード向けジャンプ入力追跡用
+
 
         self.character = None         # 現在使用中のキャラクタークラスのインスタンス
         self.invincible_timer = 0     # 無敵タイマー
@@ -1970,10 +2008,10 @@ class Player:
         if self.hit_timer > 0: self.hit_timer -= 1
 
         self.ax = 0
-        if keys[key_config['move_left']]:
+        if keys[key_config['move_left']] or (smartphone_mode and touch_keys['left']):
             self.ax = -self.move_speed
             self.facing = -1
-        if keys[key_config['move_right']]:
+        if keys[key_config['move_right']] or (smartphone_mode and touch_keys['right']):
             self.ax = self.move_speed
             self.facing = 1
 
@@ -1991,6 +2029,23 @@ class Player:
             gravity_active = True
 
         current_ay = 0.3 if gravity_active else 0.8
+        
+        # ジャンプ入力判定 (物理キー or スマホ上ボタン)
+        jump_input = keys[key_config['jump']] or (smartphone_mode and touch_keys['up'])
+        
+        # スマホモード用の離散ジャンプ判定
+        touch_jump_triggered = False
+        if smartphone_mode:
+            if touch_keys['up'] and not self.prev_touch_up:
+                touch_jump_triggered = True
+            self.prev_touch_up = touch_keys['up']
+
+        # ジャンプ挙動
+        if touch_jump_triggered and (self.y >= ground - 45 or self.jumpcount > 0):
+            self.vy = self.jump_power
+            self.jumpcount -= 1
+
+        
         self.vy += current_ay
 
         self.x += self.vx
@@ -2036,6 +2091,14 @@ class Player:
             self.vx = -self.vx
             if self.x <= 10: self.x = 10
             if self.x >= width - 40: self.x = width - 40
+
+        # スマホモードの攻撃判定
+        if smartphone_mode and touch_keys['attack'] and self.swording <= 0:
+            if self.character:
+                self.character.attack(enemies)
+            else:
+                self.swording = 12
+
 
         if self.swording > 0:
             is_critical = abs(self.vx) > 10
@@ -2903,7 +2966,8 @@ def start_next_wave():
 async def main():
     global game_state, settings_selecting, player, wave_number, enemies, enemy_bullets
     global is_combat_mode, wave_start_wait_timer, wave_clear_timer, hit_stop_timer
-    global screen
+    global screen, smartphone_mode
+
 
     pygame.init()
     screen = pygame.display.set_mode((width, height), pygame.SCALED)
@@ -2928,12 +2992,36 @@ async def main():
     is_fullscreen = False
 
     while running:
+        # --- スマホモード時の仮想キー状態更新 ---
+        if smartphone_mode:
+            touch_keys['left'] = any(V_PAD['left'].collidepoint(pos) for pos in active_fingers.values())
+            touch_keys['right'] = any(V_PAD['right'].collidepoint(pos) for pos in active_fingers.values())
+            touch_keys['up'] = any(V_PAD['up'].collidepoint(pos) for pos in active_fingers.values())
+            touch_keys['attack'] = any(V_PAD['attack'].collidepoint(pos) for pos in active_fingers.values())
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
             if event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
                 pygame.display.toggle_fullscreen()
                 is_fullscreen = not is_fullscreen
+            
+            # --- スマートフォン タッチ入力処理 ---
+            if event.type == pygame.FINGERDOWN or event.type == pygame.FINGERMOTION:
+                px, py = event.x * width, event.y * height
+                active_fingers[event.finger_id] = (px, py)
+                
+                # スキルアイコンのタッチ判定 (FINGERDOWN時のみ)
+                if event.type == pygame.FINGERDOWN and player.character:
+                    for s in player.character.skills:
+                        # アイコン領域(40x40)より少し広く判定(60x60)
+                        s_touch_rect = pygame.Rect(s.x - 10, s.y - 10, 60, 60)
+                        if s_touch_rect.collidepoint(px, py):
+                            s.activate(player, enemies if 'enemies' in locals() else [])
+            
+            if event.type == pygame.FINGERUP:
+                if event.finger_id in active_fingers:
+                    del active_fingers[event.finger_id]
             
             if game_state == STATE_LOBBY:
                 player.handle_event(event, [])
@@ -2942,6 +3030,15 @@ async def main():
                         game_state = STATE_SELECT_CHAR
                     elif event.key == pygame.K_s:
                         game_state = STATE_SETTINGS
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    mx, my = pygame.mouse.get_pos()
+                    # 「Character Selectへ進む」エリア
+                    if width // 2 - 300 <= mx <= width // 2 + 300 and 45 <= my <= 105:
+                        game_state = STATE_SELECT_CHAR
+                    # 「スマホモード切り替え」ボタン
+                    if width // 2 - 150 <= mx <= width // 2 + 150 and 130 <= my <= 180:
+                        smartphone_mode = not smartphone_mode
+
                 
             elif game_state == STATE_SETTINGS:
                 if event.type == pygame.KEYDOWN:
@@ -3004,9 +3101,17 @@ async def main():
                             wave_start_wait_timer = 60
                             game_state = STATE_PLAYING
                             break
+                    
+                    # スマホモード判定領域 (画面下部中央付近をタッチでもトグル可能にする)
+                    if 400 < mx < 800 and 480 < my < 550:
+                        smartphone_mode = not smartphone_mode
+
+                
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_r:
                         player.reincarnator_mode = not player.reincarnator_mode
+                    if event.key == pygame.K_t:
+                        smartphone_mode = not smartphone_mode
                     elif event.key == pygame.K_ESCAPE:
                         game_state = STATE_LOBBY
 
@@ -3060,10 +3165,12 @@ async def main():
                                     # REPLACE 状態に遷移した（waveは入れ替え後に開始）
                                     pass
                                 break
-                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                    # 報酬をスキップ
+                elif (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE) or \
+                     (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and smartphone_mode):
+                    # 報酬をスキップ (スマホなら画面タップでもスキップ可能にする)
                     start_next_wave()
                     game_state = STATE_PLAYING
+
 
             elif game_state == STATE_BOSS_REWARD:
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -3110,11 +3217,13 @@ async def main():
                             game_state = STATE_PLAYING
                             break
                     # キャンセルボタンなどの判定があればここに追加（今回は強制入れ替えまたは継続と想定）
-                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                    # キャンセル（入れ替えない）
+                elif (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE) or \
+                     (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and smartphone_mode):
+                    # キャンセル（入れ替えない。スマホなら画面タップでもスキップ可能にする）
                     player.character.queued_skill = None
                     start_next_wave()
                     game_state = STATE_PLAYING
+
 
             elif game_state == STATE_PLAYING:
                 player.handle_event(event, enemies if wave_start_wait_timer <= 0 else [])
@@ -3130,11 +3239,14 @@ async def main():
                         enemies.append(Enemy(width - 100, ground))
         
             elif game_state == STATE_PAUSED:
-                if event.type == pygame.KEYDOWN and event.key == key_config['pause']:
+                if (event.type == pygame.KEYDOWN and event.key == key_config['pause']) or \
+                   (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and smartphone_mode):
                     game_state = STATE_PLAYING
+
                 
             elif game_state == STATE_GAMEOVER:
-                if event.type == pygame.KEYDOWN and event.key == pygame.K_r:
+                if (event.type == pygame.KEYDOWN and event.key == pygame.K_r) or \
+                   (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and smartphone_mode):
                     player.character = None
                     player.reset()
                     enemies = []
@@ -3144,6 +3256,7 @@ async def main():
                     wave_start_wait_timer = 0
                     is_combat_mode = False
                     game_state = STATE_LOBBY
+
 
         keys = pygame.key.get_pressed()
     
@@ -3233,10 +3346,27 @@ async def main():
 
         # ロビーとセレクト画面のオーバーレイ
         if game_state == STATE_LOBBY:
-            prompt_text = font_title.render("Press [ENTER] to open Character Select", True, (255, 255, 200))
+            # メインボタン (ENTER / タップで開始)
+            btn_rect = pygame.Rect(width//2 - 300, 45, 600, 60)
+            pygame.draw.rect(screen, (30, 30, 50), btn_rect, border_radius=10)
+            pygame.draw.rect(screen, (200, 200, 255), btn_rect, 2, border_radius=10)
+            
+            prompt_text = font_title.render("Tap to open Character Select", True, (255, 255, 200))
             screen.blit(prompt_text, (width//2 - prompt_text.get_width()//2, 55))
-            hint_text = font_settings_hint.render("Press [S] for Key Settings", True, (180, 200, 255))
-            screen.blit(hint_text, (width//2 - hint_text.get_width()//2, 100))
+            
+            # スマホモード切替ボタン
+            s_btn_rect = pygame.Rect(width//2 - 150, 130, 300, 50)
+            s_color = (100, 200, 255) if smartphone_mode else (80, 80, 80)
+            pygame.draw.rect(screen, (40, 40, 60), s_btn_rect, border_radius=5)
+            pygame.draw.rect(screen, s_color, s_btn_rect, 2, border_radius=5)
+            
+            s_text = "Smartphone Mode: ON" if smartphone_mode else "Smartphone Mode: OFF"
+            s_surf = font_settings_hint.render(s_text, True, s_color)
+            screen.blit(s_surf, (width//2 - s_surf.get_width()//2, 140))
+
+            hint_text = font_settings_footer.render("Press [S] for Key Settings", True, (180, 200, 255))
+            screen.blit(hint_text, (width//2 - hint_text.get_width()//2, 200))
+
         
         elif game_state == STATE_SETTINGS:
             overlay = pygame.Surface((width, height), pygame.SRCALPHA)
@@ -3325,8 +3455,10 @@ async def main():
             overlay = pygame.Surface((width, height), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, 100))
             screen.blit(overlay, (0, 0))
-            pause_text = font_main.render("PAUSED (Press 'Q' to Resume)", True, (255, 255, 255))
+            pause_label = "Tap" if smartphone_mode else "Press 'Q'"
+            pause_text = font_main.render(f"PAUSED ({pause_label} to Resume)", True, (255, 255, 255))
             screen.blit(pause_text, (width//2 - 200, height//2))
+
 
         elif game_state == STATE_SELECT_CHAR:
             overlay = pygame.Surface((width, height), pygame.SRCALPHA)
@@ -3376,8 +3508,16 @@ async def main():
             mode_text = "Reincarnator Mode: ON" if player.reincarnator_mode else "Reincarnator Mode: OFF"
             mode_color = (100, 255, 100) if player.reincarnator_mode else (150, 150, 150)
             mode_surf = font_main.render(mode_text, True, mode_color)
-            hint_surf = font_settings_hint.render("Press 'R' to toggle Reincarnator Mode", True, (200, 200, 200))
-            screen.blit(mode_surf, (width // 2 - mode_surf.get_width() // 2, height - 80))
+            
+            # スマホモードのトグル表示
+            s_mode_text = "Smartphone Mode: ON" if smartphone_mode else "Smartphone Mode: OFF"
+            s_mode_color = (100, 200, 255) if smartphone_mode else (150, 150, 150)
+            s_mode_surf = font_main.render(s_mode_text, True, s_mode_color)
+            
+            hint_surf = font_settings_hint.render("Press 'R' (Reincarn) / 'T' (Smartphone) to toggle", True, (200, 200, 200))
+            
+            screen.blit(mode_surf, (width // 2 - mode_surf.get_width() - 20, height - 100))
+            screen.blit(s_mode_surf, (width // 2 + 20, height - 100))
             screen.blit(hint_surf, (width // 2 - hint_surf.get_width() // 2, height - 40))
 
         elif game_state == STATE_CHOOSE_WEAPON:
@@ -3506,9 +3646,11 @@ async def main():
             overlay.fill((200, 0, 0, 150))
             screen.blit(overlay, (0, 0))
             go_text = font_gameover.render("GAME OVER", True, (255, 255, 255))
-            retry_text = font_main.render("Press 'R' to Retry", True, (255, 255, 255))
+            retry_label = "Tap" if smartphone_mode else "Press 'R'"
+            retry_text = font_main.render(f"{retry_label} to Retry", True, (255, 255, 255))
             screen.blit(go_text, (width//2 - 220, height//2 - 50))
             screen.blit(retry_text, (width//2 - 150, height//2 + 50))
+
             if keys[pygame.K_r]:
                 player = Player()
                 enemies = []
@@ -3518,6 +3660,28 @@ async def main():
                 wave_clear_timer = 0
                 wave_start_wait_timer = 0
                 game_state = STATE_LOBBY
+
+        # --- スマートフォン用バーチャルパッドの描画 (最前面) ---
+        if smartphone_mode:
+            v_overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+            for btn_name, rect in V_PAD.items():
+                # 各ボタンの描画 (半透明の白)
+                color = (255, 255, 255, 60)
+                # 押されている間は明るく
+                if touch_keys.get(btn_name, False):
+                    color = (255, 255, 255, 120)
+                
+                if btn_name == 'attack':
+                    pygame.draw.circle(v_overlay, color, rect.center, rect.width // 2)
+                    atk_text = font_upgrade_name.render("ATK", True, (255, 255, 255))
+                    v_overlay.blit(atk_text, (rect.centerx - atk_text.get_width()//2, rect.centery - atk_text.get_height()//2))
+                else:
+                    pygame.draw.circle(v_overlay, color, rect.center, rect.width // 2)
+                    label = "L" if btn_name == 'left' else ("R" if btn_name == 'right' else "UP")
+                    lbl_text = font_upgrade_name.render(label, True, (255, 255, 255))
+                    v_overlay.blit(lbl_text, (rect.centerx - lbl_text.get_width()//2, rect.centery - lbl_text.get_height()//2))
+            
+            screen.blit(v_overlay, (0, 0))
 
         pygame.display.flip()
         clock.tick(60)
