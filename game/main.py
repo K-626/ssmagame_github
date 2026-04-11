@@ -55,18 +55,25 @@ KEY_ACTION_NAMES = {
 game_state = STATE_LOBBY
 
 # --- Smartphone / Touch Control Settings ---
-smartphone_mode = False
+smartphone_mode = 0 # 0: OFF, 1: Mode 1, 2: Mode 2
 active_fingers = {} # finger_id -> (last_x, last_y)
 touch_keys = {
     'left': False, 'right': False, 'up': False, 'attack': False
 }
-# Virtual Pad Layout (1200x600 resolution)
-V_PAD = {
-    'left': pygame.Rect(40, 460, 100, 100),
-    'right': pygame.Rect(180, 460, 100, 100),
-    'up': pygame.Rect(110, 340, 100, 100),
+# Virtual Pad Layouts (1200x600 resolution)
+V_PAD_1 = {
+    'left': pygame.Rect(30, 450, 120, 120),
+    'right': pygame.Rect(170, 450, 120, 120),
+    'up': pygame.Rect(100, 330, 120, 120),
     'attack': pygame.Rect(950, 400, 200, 160)
 }
+V_PAD_2 = {
+    'left': pygame.Rect(30, 390, 150, 150),
+    'right': pygame.Rect(210, 390, 150, 150),
+    'up': pygame.Rect(760, 340, 140, 140),
+    'attack': pygame.Rect(950, 400, 200, 160)
+}
+V_PAD = V_PAD_1
 
 
 # Push factor (for collision separation)
@@ -3143,7 +3150,7 @@ def start_next_wave():
 async def main():
     global game_state, settings_selecting, player, wave_number, enemies, enemy_bullets
     global is_combat_mode, wave_start_wait_timer, wave_clear_timer, hit_stop_timer
-    global screen, smartphone_mode
+    global screen, smartphone_mode, V_PAD
 
 
     pygame.init()
@@ -3214,7 +3221,8 @@ async def main():
                         game_state = STATE_SELECT_CHAR
                     # "Smartphone Mode" toggle button
                     if width // 2 - 150 <= mx <= width // 2 + 150 and 130 <= my <= 180:
-                        smartphone_mode = not smartphone_mode
+                        smartphone_mode = (smartphone_mode + 1) % 3
+                        V_PAD = V_PAD_1 if smartphone_mode == 1 else V_PAD_2
 
                 
             elif game_state == STATE_SETTINGS:
@@ -3281,14 +3289,16 @@ async def main():
                     
                     # Smartphone mode toggle area
                     if 400 < mx < 800 and 480 < my < 550:
-                        smartphone_mode = not smartphone_mode
+                        smartphone_mode = (smartphone_mode + 1) % 3
+                        V_PAD = V_PAD_1 if smartphone_mode == 1 else V_PAD_2
 
                 
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_r:
                         player.reincarnator_mode = not player.reincarnator_mode
                     if event.key == pygame.K_t:
-                        smartphone_mode = not smartphone_mode
+                        smartphone_mode = (smartphone_mode + 1) % 3
+                        V_PAD = V_PAD_1 if smartphone_mode == 1 else V_PAD_2
                     elif event.key == pygame.K_ESCAPE:
                         game_state = STATE_LOBBY
 
@@ -3537,7 +3547,9 @@ async def main():
             pygame.draw.rect(screen, (40, 40, 60), s_btn_rect, border_radius=5)
             pygame.draw.rect(screen, s_color, s_btn_rect, 2, border_radius=5)
             
-            s_text = "Smartphone Mode: ON" if smartphone_mode else "Smartphone Mode: OFF"
+            if smartphone_mode == 1: s_text = "Smartphone Mode: ON 1"
+            elif smartphone_mode == 2: s_text = "Smartphone Mode: ON 2"
+            else: s_text = "Smartphone Mode: OFF"
             s_surf = font_settings_hint.render(s_text, True, s_color)
             screen.blit(s_surf, (width//2 - s_surf.get_width()//2, 140))
 
@@ -3687,7 +3699,9 @@ async def main():
             mode_surf = font_main.render(mode_text, True, mode_color)
             
             # Smartphone mode toggle display
-            s_mode_text = "Smartphone Mode: ON" if smartphone_mode else "Smartphone Mode: OFF"
+            if smartphone_mode == 1: s_mode_text = "Smartphone Mode: ON 1"
+            elif smartphone_mode == 2: s_mode_text = "Smartphone Mode: ON 2"
+            else: s_mode_text = "Smartphone Mode: OFF"
             s_mode_color = (100, 200, 255) if smartphone_mode else (150, 150, 150)
             s_mode_surf = font_main.render(s_mode_text, True, s_mode_color)
             
