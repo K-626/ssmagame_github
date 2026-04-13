@@ -58,20 +58,22 @@ game_state = STATE_LOBBY
 smartphone_mode = 0 # 0: OFF, 1: Mode 1, 2: Mode 2
 active_fingers = {} # finger_id -> (last_x, last_y)
 touch_keys = {
-    'left': False, 'right': False, 'up': False, 'attack': False
+    'left': False, 'right': False, 'up': False, 'attack': False, 'pause': False
 }
 # Virtual Pad Layouts (1200x600 resolution)
 V_PAD_1 = {
     'left': pygame.Rect(30, 450, 120, 120),
     'right': pygame.Rect(170, 450, 120, 120),
     'up': pygame.Rect(100, 330, 120, 120),
-    'attack': pygame.Rect(950, 400, 200, 160)
+    'attack': pygame.Rect(950, 400, 200, 160),
+    'pause': pygame.Rect(1100, 20, 80, 80)
 }
 V_PAD_2 = {
     'left': pygame.Rect(30, 390, 150, 150),
     'right': pygame.Rect(210, 390, 150, 150),
     'up': pygame.Rect(760, 340, 140, 140),
-    'attack': pygame.Rect(950, 400, 200, 160)
+    'attack': pygame.Rect(950, 400, 200, 160),
+    'pause': pygame.Rect(1100, 20, 80, 80)
 }
 V_PAD = V_PAD_1
 
@@ -307,7 +309,7 @@ class FireSkill(Skill):
                     if e.hp > 0 and e.x <= bx <= e.x + e.width and e.y <= by <= e.y + e.height:
                         # Pierce: Deal damage if enemy hasn't been hit by this bullet yet
                         if e not in b[4]:
-                            if e.take_damage(1 + self.damage_bonus, 1 if b[2] > 0 else -1, element='fire'):
+                            if e.take_damage(1 + self.damage_bonus, 1 if b[2] > 0 else -1, element='fire', ignore_iframes=True):
                                 b[4].append(e)
 
             
@@ -448,7 +450,7 @@ class MagicSwordSkill(Skill):
                     if e.hp > 0 and wave_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                         if e not in w[4]:
 
-                            if e.take_damage(2 + self.damage_bonus, 1 if w[2] > 0 else -1):
+                            if e.take_damage(2 + self.damage_bonus, 1 if w[2] > 0 else -1, ignore_iframes=True):
                                 w[4].append(e)
             if w[3] > 0: new_waves.append(w)
         self.waves = new_waves
@@ -534,7 +536,7 @@ class PiercingArrowSkill(Skill):
             if enemies:
                 for e in enemies:
                     if e.hp > 0 and e not in a[4] and e.x < a[0] < e.x + e.width and e.y < a[1] < e.y + e.height:
-                        if e.take_damage(2 + self.damage_bonus, 1 if a[2] > 0 else -1):
+                        if e.take_damage(2 + self.damage_bonus, 1 if a[2] > 0 else -1, ignore_iframes=True):
                             a[4].append(e) # Piercing
 
             if -100 < a[0] < width + 100 and -100 < a[1] < height + 100 and a[1] < ground + 20:
@@ -602,7 +604,7 @@ class ArrowRainSkill(Skill):
             if enemies:
                 for e in enemies:
                     if e.hp > 0 and e.x < a[0] < e.x + e.width and e.y < a[1] < e.y + e.height:
-                        e.take_damage(2, 1 if a[0] > self.spawn_x_base else -1); hit = True; break
+                        e.take_damage(2, 1 if a[0] > self.spawn_x_base else -1, ignore_iframes=True); hit = True; break
             if not hit and a[1] < ground + 20: new_arrows.append(a)
         self.arrows = new_arrows
     def draw_effect(self, screen):
@@ -624,7 +626,7 @@ class PinningArrowSkill(Skill):
             if enemies:
                 for e in enemies:
                     if e.hp > 0 and e.x < a[0] < e.x + e.width and e.y < a[1] < e.y + e.height:
-                        if e.take_damage(1, 1 if a[2] > 0 else -1):
+                        if e.take_damage(1, 1 if a[2] > 0 else -1, ignore_iframes=True):
                             e.frozen_timer = 180; self.arrows.remove(a); break
             if a in self.arrows and not (-100 < a[0] < width + 100): self.arrows.remove(a)
     def draw_effect(self, screen):
@@ -696,7 +698,7 @@ class HammerThrowSkill(Skill):
             if enemies:
                 for e in enemies:
                     if e.hp > 0 and e not in h[6] and e.x < h[0]+30 and h[0]-30 < e.x+e.width and e.y < h[1]+30 and h[1]-30 < e.y+e.height:
-                        e.take_damage(4, 1 if h[2]>0 else -1, knockback_x=8, knockback_y=-5, element='heavy')
+                        e.take_damage(4, 1 if h[2]>0 else -1, knockback_x=8, knockback_y=-5, element='heavy', ignore_iframes=True)
                         h[6].append(e)
                         
             if h[4] <= -100: self.hammer = None
@@ -1281,7 +1283,7 @@ class Pyromancer(Character):
             if enemies:
                 for e in enemies:
                     if e.hp > 0 and e.x < fb[0] < e.x + e.width and e.y < fb[1] < e.y + e.height:
-                        if e.take_damage(1, fb[4], element='fire'): # Use fireball's facing
+                        if e.take_damage(1, fb[4], element='fire', ignore_iframes=True): # Use fireball's facing
                             hit = True
                             break
 
@@ -2027,6 +2029,249 @@ class MonsterBeta(Character):
                 # Ampule cap (white)
                 pygame.draw.rect(screen, (255, 255, 255), (ix, start_y, icon_w, 2))
 
+class AlHumaSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 600, (150, 255, 255), (100, 200, 255))
+        self.blocks = []
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            for _ in range(12):
+                angle = random.uniform(0, math.pi * 2)
+                dist = random.uniform(30, 60)
+                bx = player.x + 20 + math.cos(angle) * dist
+                by = player.y + 20 + math.sin(angle) * dist
+                self.blocks.append([bx, by, 0, 0, 0, 60, None])
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        new_blocks = []
+        for b in self.blocks:
+            if b[4] == 0:
+                b[5] -= 1
+                b[1] += math.sin(pygame.time.get_ticks() * 0.005 + b[0]) * 0.5
+                if b[5] <= 0:
+                    b[4] = 1 # homing
+                    alive = [e for e in enemies if e.hp > 0] if enemies else []
+                    if alive: b[6] = random.choice(alive)
+                    else:
+                        b[2] = random.choice([-15, 15])
+                        b[3] = random.uniform(-5, 5)
+            elif b[4] == 1:
+                # homing
+                if b[6] and b[6].hp > 0:
+                    dx = b[6].x + b[6].width/2 - b[0]
+                    dy = b[6].y + b[6].height/2 - b[1]
+                    d = max(1, math.hypot(dx, dy))
+                    b[2] = (dx / d) * 25
+                    b[3] = (dy / d) * 25
+                b[0] += b[2]
+                b[1] += b[3]
+                
+            hit = False
+            if enemies and b[4] == 1:
+                for e in enemies:
+                    if e.hp > 0 and e.x < b[0] < e.x + e.width and e.y < b[1] < e.y + e.height:
+                        e.take_damage(2 + self.damage_bonus, 1 if b[2] > 0 else -1, element='ice', ignore_iframes=True)
+                        hit = True
+                        break
+            if not hit and -100 < b[0] < width + 100 and -100 < b[1] < height + 100:
+                new_blocks.append(b)
+        self.blocks = new_blocks
+    def draw_effect(self, screen):
+        for b in self.blocks:
+            pygame.draw.rect(screen, (150, 255, 255), (int(b[0])-6, int(b[1])-6, 12, 12))
+
+class IceBrandArtsSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 1200, (100, 200, 255), (0, 150, 255))
+        self.active_timer = 0
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            self.active_timer = 600
+            self.player_ref = player
+            player._ice_brand_timer = 600
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        if self.active_timer > 0:
+            self.active_timer -= 1
+            if self.player_ref:
+                self.player_ref._ice_brand_timer = self.active_timer
+    def draw_effect(self, screen):
+        if self.active_timer > 0 and hasattr(self, 'player_ref') and self.player_ref:
+            pygame.draw.circle(screen, (100, 200, 255), (int(self.player_ref.x+20), int(self.player_ref.y+20)), 35, 2)
+
+class BlizzardLanceSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 480, (200, 255, 255), (100, 255, 255))
+        self.lance = None
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            self.lance = [player.x + 20, player.y + 10, 30 * player.facing, 0, []]
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        if self.lance:
+            l = self.lance
+            l[0] += l[2]
+            if enemies:
+                for e in enemies:
+                    if e.hp > 0 and e not in l[4] and e.x < l[0] + 60 and l[0] - 60 < e.x + e.width and e.y < l[1] + 15 and l[1] - 15 < e.y + e.height:
+                        e.take_damage(10 + self.damage_bonus, 1 if l[2] > 0 else -1, knockback_x=5, element='ice', ignore_iframes=True)
+                        l[4].append(e)
+            if not (-200 < l[0] < width + 200):
+                self.lance = None
+    def draw_effect(self, screen):
+        if self.lance:
+            l = self.lance
+            points = []
+            direction = 1 if l[2] > 0 else -1
+            points.append((l[0] + 80 * direction, l[1]))
+            points.append((l[0] - 40 * direction, l[1] - 15))
+            points.append((l[0] - 40 * direction, l[1] + 15))
+            pygame.draw.polygon(screen, (150, 255, 255), points)
+
+class IceShieldSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 600, (50, 150, 255), (0, 100, 255))
+        self.active_timer = 0
+        self.shield_rect = None
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            self.active_timer = 300
+            self.player_ref = player
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        if self.active_timer > 0:
+            self.active_timer -= 1
+            if self.player_ref:
+                sp_x = self.player_ref.x + 50 * self.player_ref.facing
+                if self.player_ref.facing < 0:
+                    sp_x -= 20
+                self.shield_rect = pygame.Rect(sp_x, self.player_ref.y - 10, 20, 60)
+                if enemies:
+                    for e in enemies:
+                        if e.hp > 0 and self.shield_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+                            e.frozen_timer = max(e.frozen_timer if hasattr(e, 'frozen_timer') else 0, 60)
+        else:
+            self.shield_rect = None
+    def draw_effect(self, screen):
+        if self.shield_rect:
+            pygame.draw.rect(screen, (150, 255, 255), self.shield_rect)
+
+class CocytusSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 1200, (200, 255, 255), (255, 255, 255))
+        self.active_timer = 0
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            self.active_timer = 30
+            if enemies:
+                for e in enemies:
+                    if e.hp > 0:
+                        e.frozen_timer = 300
+                        e.take_damage(5 + self.damage_bonus, 0, element='ice')
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        if self.active_timer > 0:
+            self.active_timer -= 1
+    def draw_effect(self, screen):
+        if self.active_timer > 0:
+            overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+            overlay.fill((200, 255, 255, 100))
+            screen.blit(overlay, (0, 0))
+
+class IceMage(Character):
+    """Ice Mage: Uses various ice-based skills and freezing effects."""
+    def __init__(self, player):
+        super().__init__(player)
+        self.skill_alhuma = AlHumaSkill(15, 15)
+        self.skill_icebrand = IceBrandArtsSkill(75, 15)
+        self.skill_lance = BlizzardLanceSkill(135, 15)
+        self.skill_shield = IceShieldSkill(195, 15)
+        self.skill_cocytus = CocytusSkill(255, 15)
+        self.skills = [self.skill_alhuma, self.skill_icebrand, self.skill_lance, self.skill_shield, self.skill_cocytus]
+        
+        self.ice_blocks = []
+        self.player._ice_brand_timer = 0
+        
+    def get_max_hp(self): return 8
+    def get_speed(self): return 1.2
+    def get_jump_power(self): return -14
+
+    def attack(self, enemies):
+        if getattr(self.player, '_ice_brand_timer', 0) > 0:
+            self.player.swording = 15
+            self.player.hit_timer = max(self.player.hit_timer, 20)
+            hx = self.player.x + (60 * self.player.facing)
+            hy = self.player.y + 20
+            if enemies:
+                sword_rect = pygame.Rect(hx - 40, hy - 40, 80, 80)
+                for e in enemies:
+                    if e.hp > 0:
+                        if sword_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+                            e.take_damage(int(2 + self.player.damage_multiplier), self.player.facing, element='ice')
+                            e.frozen_timer = max(e.frozen_timer if hasattr(e, 'frozen_timer') else 0, 30)
+        else:
+            vx = 20 * self.player.facing
+            self.ice_blocks.append([self.player.x + 20, self.player.y + 20, vx, 40, self.player.facing])
+
+    def handle_event(self, event, enemies):
+        super().handle_event(event, enemies)
+        if event.type == pygame.KEYDOWN:
+            if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
+                self.player.vy = self.player.jump_power
+                self.player.jumpcount -= 1
+            if not self.is_reincarnator_mode:
+                if event.key == key_config['skill_1']: self.skill_alhuma.activate(self.player, enemies)
+                if event.key == key_config['skill_2']: self.skill_icebrand.activate(self.player, enemies)
+                if event.key == key_config['skill_3']: self.skill_lance.activate(self.player, enemies)
+                if event.key == key_config['skill_4']: self.skill_shield.activate(self.player, enemies)
+                if event.key == key_config['skill_5']: self.skill_cocytus.activate(self.player, enemies)
+
+    def update(self, keys, enemies, cooldown_speed):
+        super().update(keys, enemies, cooldown_speed)
+        new_blocks = []
+        for b in self.ice_blocks:
+            b[0] += b[2]
+            b[3] -= 1
+            hit = False
+            if enemies:
+                for e in enemies:
+                    if e.hp > 0 and e.x < b[0] < e.x + e.width and e.y < b[1] < e.y + e.height:
+                        if e.take_damage(1, b[4], element='ice', ignore_iframes=True):
+                            hit = True
+                            break
+            if hit or b[3] <= 0:
+                pass
+            else:
+                new_blocks.append(b)
+        self.ice_blocks = new_blocks
+        
+        if getattr(self.player, '_ice_brand_timer', 0) > 0:
+            self.player.move_speed = 1.6
+        else:
+            self.player.move_speed = 1.2
+
+    def draw_effects(self, screen):
+        super().draw_effects(screen)
+        for b in self.ice_blocks:
+            pygame.draw.rect(screen, (200, 255, 255), (int(b[0]), int(b[1]), 15, 15))
+        
+        if getattr(self.player, '_ice_brand_timer', 0) > 0 and self.player.swording > 0:
+            p = self.player
+            center = (int(p.x + 20), int(p.y + 20))
+            offset_x = 40 * p.facing
+            pygame.draw.line(screen, (150, 255, 255), center, (center[0] + offset_x, center[1] - 30), 5)
+            pygame.draw.line(screen, (150, 255, 255), center, (center[0] + offset_x, center[1] + 30), 5)
+
 # --- Player Class Definition ---
 class Player:
     """
@@ -2420,7 +2665,7 @@ class Enemy:
     def _update_behavior(self, player):
         pass
 
-    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None):
+    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None, ignore_iframes=False):
         if self.hp <= 0: return False
         
         # Elemental synergy
@@ -2440,7 +2685,7 @@ class Enemy:
             if self.hp <= 0: self._spawn_debris()
             return True
             
-        if self.hit_timer > 0: return False
+        if self.hit_timer > 0 and not ignore_iframes: return False
         
         if self.frozen_timer > 0:
             # Skip knockback while frozen
@@ -3148,7 +3393,7 @@ async def main():
 
 
     pygame.init()
-    screen = pygame.display.set_mode((width, height), pygame.SCALED)
+    screen = pygame.display.set_mode((width, height))
     clock = pygame.time.Clock()
 
     # Pre-define fonts to avoid creating them every frame (major performance bottleneck)
@@ -3176,6 +3421,7 @@ async def main():
             touch_keys['right'] = any(V_PAD['right'].collidepoint(pos) for pos in active_fingers.values())
             touch_keys['up'] = any(V_PAD['up'].collidepoint(pos) for pos in active_fingers.values())
             touch_keys['attack'] = any(V_PAD['attack'].collidepoint(pos) for pos in active_fingers.values())
+            touch_keys['pause'] = any(V_PAD['pause'].collidepoint(pos) for pos in active_fingers.values())
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -3188,6 +3434,10 @@ async def main():
             if event.type == pygame.FINGERDOWN or event.type == pygame.FINGERMOTION:
                 px, py = event.x * width, event.y * height
                 active_fingers[event.finger_id] = (px, py)
+                
+                if event.type == pygame.FINGERDOWN and game_state == STATE_PLAYING:
+                    if smartphone_mode and 'pause' in V_PAD and V_PAD['pause'].collidepoint(px, py):
+                        game_state = STATE_PAUSED
                 
                 # Skill icon touch detection (FINGERDOWN only)
                 if event.type == pygame.FINGERDOWN and player.character:
@@ -3263,6 +3513,7 @@ async def main():
                             elif i == 4: player.set_character(Pyromancer)
                             elif i == 5: player.set_character(Lancer)
                             elif i == 6: player.set_character(MonsterBeta)
+                            elif i == 7: player.set_character(IceMage)
                         
                             # Apply reincarnator mode flag to the new character
                             if player.character:
@@ -3423,9 +3674,25 @@ async def main():
                         enemies.append(Enemy(width - 100, ground))
         
             elif game_state == STATE_PAUSED:
-                if (event.type == pygame.KEYDOWN and event.key == key_config['pause']) or \
-                   (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and smartphone_mode):
+                if event.type == pygame.KEYDOWN and event.key == key_config['pause']:
                     game_state = STATE_PLAYING
+                
+                pt_x, pt_y = -1, -1
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    pt_x, pt_y = pygame.mouse.get_pos()
+                elif event.type == pygame.FINGERDOWN:
+                    pt_x, pt_y = event.x * width, event.y * height
+                    
+                if pt_x != -1:
+                    btn_w, btn_h = 300, 60
+                    resume_rect = pygame.Rect(width//2 - btn_w//2, height//2 - 20, btn_w, btn_h)
+                    title_rect = pygame.Rect(width//2 - btn_w//2, height//2 + 70, btn_w, btn_h)
+                    if resume_rect.collidepoint(pt_x, pt_y):
+                        game_state = STATE_PLAYING
+                    elif title_rect.collidepoint(pt_x, pt_y):
+                        player.reset()
+                        game_state = STATE_LOBBY
+                        hit_stop_timer = 0
 
                 
             elif game_state == STATE_GAMEOVER:
@@ -3638,8 +3905,10 @@ async def main():
                 draw_rect = pygame.Rect(rx, ry - (15 if is_hover else 0), card_w, card_h)
                 
                 # Card background
-                pygame.draw.rect(screen, (60, 60, 80) if is_hover else (40, 40, 60), draw_rect, border_radius=15)
-                pygame.draw.rect(screen, r["color"], draw_rect, 4 if is_hover else 2, border_radius=15)
+                bg_color = [min(255, int(c * (0.6 if is_hover else 0.4))) for c in r["color"]]
+                pygame.draw.rect(screen, bg_color, draw_rect, border_radius=15)
+                outline_color = (255, 255, 255) if is_hover else [min(255, int(c * 0.8)) for c in r["color"]]
+                pygame.draw.rect(screen, outline_color, draw_rect, 4 if is_hover else 2, border_radius=15)
                 
                 # Text
                 name_color = r["color"] if is_hover else (255, 255, 255)
@@ -3653,9 +3922,30 @@ async def main():
             overlay = pygame.Surface((width, height), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, 100))
             screen.blit(overlay, (0, 0))
-            pause_label = "Tap" if smartphone_mode else "Press 'Q'"
-            pause_text = font_main.render(f"PAUSED ({pause_label} to Resume)", True, (255, 255, 255))
-            screen.blit(pause_text, (width//2 - 200, height//2))
+            pause_text = font_title.render("PAUSED", True, (255, 255, 255))
+            screen.blit(pause_text, (width//2 - pause_text.get_width()//2, height//2 - 150))
+            
+            rmx, rmy = pygame.mouse.get_pos()
+            btn_w, btn_h = 300, 60
+            resume_rect = pygame.Rect(width//2 - btn_w//2, height//2 - 20, btn_w, btn_h)
+            title_rect = pygame.Rect(width//2 - btn_w//2, height//2 + 70, btn_w, btn_h)
+            
+            res_hover = resume_rect.collidepoint(rmx, rmy)
+            tit_hover = title_rect.collidepoint(rmx, rmy)
+            
+            pygame.draw.rect(screen, (80, 80, 100) if res_hover else (50, 50, 70), resume_rect, border_radius=10)
+            pygame.draw.rect(screen, (200, 255, 200), resume_rect, 3 if res_hover else 1, border_radius=10)
+            res_t = font_main.render("Resume", True, (255, 255, 255))
+            screen.blit(res_t, (width//2 - res_t.get_width()//2, height//2 - 20 + 15))
+            
+            pygame.draw.rect(screen, (100, 60, 60) if tit_hover else (70, 40, 40), title_rect, border_radius=10)
+            pygame.draw.rect(screen, (255, 150, 150), title_rect, 3 if tit_hover else 1, border_radius=10)
+            tit_t = font_main.render("Return to Title", True, (255, 255, 255))
+            screen.blit(tit_t, (width//2 - tit_t.get_width()//2, height//2 + 70 + 15))
+            
+            if smartphone_mode == 0:
+                hint_text = font_settings_hint.render("Press 'Q' to Resume", True, (200, 200, 200))
+                screen.blit(hint_text, (width//2 - hint_text.get_width()//2, height//2 + 160))
 
 
         elif game_state == STATE_SELECT_CHAR:
@@ -3670,7 +3960,8 @@ async def main():
                 {"name": "Warrior", "color": (150, 100, 20), "skills": "J:HammerThrow K:SuperArmor\nL:Energy N:Earthquake\nM:WarCry"},
                 {"name": "Pyromancer", "color": (200, 50, 0), "skills": "J:Lava K:SpreadFire\nL:Eruption N:FlameDash\nM:Meteor"},
                 {"name": "Lancer", "color": (50, 150, 150), "skills": "J:Javelin K:VaultStrike\nL:RapidThrust N:Sweep\nM:DragonDive"},
-                {"name": "MonsterBeta", "color": (120, 30, 30), "skills": "J:Pounce K:ScaleShot\nL:Roar N:Ampule\nM:Rampage"}
+                {"name": "MonsterBeta", "color": (120, 30, 30), "skills": "J:Pounce K:ScaleShot\nL:Roar N:Ampule\nM:Rampage"},
+                {"name": "IceMage", "color": (100, 200, 255), "skills": "J:AlHuma K:IceBrand\nL:Lance N:Shield\nM:Cocytus"}
             ]
         
             scale = 0.52
@@ -3891,7 +4182,7 @@ async def main():
                     v_overlay.blit(atk_text, (rect.centerx - atk_text.get_width()//2, rect.centery - atk_text.get_height()//2))
                 else:
                     pygame.draw.circle(v_overlay, color, rect.center, rect.width // 2)
-                    label = "L" if btn_name == 'left' else ("R" if btn_name == 'right' else "UP")
+                    label = "L" if btn_name == 'left' else ("R" if btn_name == 'right' else ("UP" if btn_name == 'up' else "||"))
                     lbl_text = font_upgrade_name.render(label, True, (255, 255, 255))
                     v_overlay.blit(lbl_text, (rect.centerx - lbl_text.get_width()//2, rect.centery - lbl_text.get_height()//2))
             
