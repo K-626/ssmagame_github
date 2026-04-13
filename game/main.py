@@ -2960,13 +2960,13 @@ class ShieldEnemy(Enemy):
            player.y < self.y + self.height and self.y < player.y + player.height:
             player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
 
-    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None):
+    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None, ignore_iframes=False):
         # Halve damage if attacking from the front (facing direction)
         if not status_effect and source_facing == self.facing:
 
             damage = max(1, damage // 2)
             knockback_x = max(1, knockback_x // 2)
-        return super().take_damage(damage, source_facing, knockback_x, knockback_y, status_effect, element)
+        return super().take_damage(damage, source_facing, knockback_x, knockback_y, status_effect, element, ignore_iframes)
 
     def draw(self, screen):
         super().draw(screen)
@@ -3281,11 +3281,11 @@ class BlockGolemBoss(Enemy):
            player.y < self.y + self.height and self.y < player.y + player.height:
             player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
 
-    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None):
+    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None, ignore_iframes=False):
         if self.shield_timer > 0:
             damage = max(1, damage // 5) # [Translated/Cleaned Comment]
         # Boss is resistant to knockback
-        return super().take_damage(damage, source_facing, knockback_x * 0.2, knockback_y * 0.2, status_effect, element)
+        return super().take_damage(damage, source_facing, knockback_x * 0.2, knockback_y * 0.2, status_effect, element, ignore_iframes)
 
     def draw(self, screen):
         if self.hp <= 0:
