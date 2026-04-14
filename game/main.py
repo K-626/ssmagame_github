@@ -716,6 +716,7 @@ class SuperArmorSkill(Skill):
     def __init__(self, x, y):
         super().__init__(x, y, 900, (200, 200, 255), (100, 100, 255))
         self.active_timer = 0
+        self.initial_duration = 420
         self.player_ref = None
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
@@ -2086,6 +2087,7 @@ class IceBrandArtsSkill(Skill):
     def __init__(self, x, y):
         super().__init__(x, y, 1200, (100, 200, 255), (0, 150, 255))
         self.active_timer = 0
+        self.initial_duration = 600
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
             self.active_timer = 600
@@ -2138,6 +2140,7 @@ class IceShieldSkill(Skill):
     def __init__(self, x, y):
         super().__init__(x, y, 600, (50, 150, 255), (0, 100, 255))
         self.active_timer = 0
+        self.initial_duration = 300
         self.shield_rect = None
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
@@ -2174,7 +2177,7 @@ class CocytusSkill(Skill):
             if enemies:
                 for e in enemies:
                     if e.hp > 0:
-                        e.frozen_timer = 300
+                        e.frozen_timer = 10
                         e.take_damage(5 + self.damage_bonus, 0, element='ice')
             return True
         return False
