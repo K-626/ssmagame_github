@@ -281,17 +281,17 @@ class LavaSkill(Skill):
 
 class FireSkill(Skill):
     def __init__(self, x, y):
-        super().__init__(x, y, 60, (255, 100, 100), (255, 0, 0))
+        super().__init__(x, y, 40, (255, 100, 100), (255, 0, 0))
         self.bullets = [] # list of [x, y, vx, timer]
         self.width = 40
         self.height = 20
-        self.speed = 15
+        self.speed = 18
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
             # Factor in player's speed when launched
             vx = (self.speed + abs(player.vx)) * player.facing
             # Launch from near player center [x, y, vx, timer, hit_enemies]
-            self.bullets.append([player.x + 20, player.y + 10, vx, 60, []])
+            self.bullets.append([player.x + 20, player.y + 10, vx, 80, []])
             return True
 
         return False
@@ -379,12 +379,12 @@ class ThunderSkill(Skill):
 
 class DashStrikeSkill(Skill):
     def __init__(self, x, y):
-        super().__init__(x, y, 90, (255, 255, 255), (100, 100, 255))
+        super().__init__(x, y, 60, (255, 255, 255), (100, 100, 255))
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            player.vx = 25 * player.facing
-            player.swording = 15
-            player.hit_timer = max(player.hit_timer, 20)
+            player.vx = 30 * player.facing
+            player.swording = 20
+            player.hit_timer = max(player.hit_timer, 25)
             return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
@@ -488,12 +488,12 @@ class MagicSwordSkill(Skill):
 
 class RisingStrikeSkill(Skill):
     def __init__(self, x, y):
-        super().__init__(x, y, 60, (255, 100, 50), (150, 50, 0))
+        super().__init__(x, y, 45, (255, 100, 50), (150, 50, 0))
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            player.swording = 15
+            player.swording = 18
             player.vy = -25
-            player.hit_timer = max(player.hit_timer, 25)
+            player.hit_timer = max(player.hit_timer, 30)
             player.y -= 10
             return True
         return False
@@ -1057,7 +1057,7 @@ class EruptionSkill(Skill):
 class FlameDashSkill(Skill):
     def __init__(self, x, y):
         super().__init__(x, y, 240, (255, 120, 50), (200, 50, 0))
-        self.flames = [] # [x, y, timer, facing]
+        self.flames = [] # [x, y, timer, facing, hit_enemies]
         self.active_timer = 0
         self.player_ref = None
     def activate(self, player, enemies=None):
@@ -1079,17 +1079,19 @@ class FlameDashSkill(Skill):
             p.invincible_timer = max(p.invincible_timer, 2)
             # Drop fire every 3 frames
             if self.active_timer % 3 == 0:
-                self.flames.append([p.x, p.y, 75, p.facing])
+                self.flames.append([p.x, p.y, 75, p.facing, []])
 
                 
         for f in self.flames[:]:
             f[2] -= 1
             if enemies:
                 f_rect = pygame.Rect(f[0], f[1], 40, 40)
+                hit_list = f[4] if len(f) > 4 else []
                 for e in enemies:
-                    if e.hp > 0 and f_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+                    if e.hp > 0 and e not in hit_list and f_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                         e.burn_timer = 180
-                        e.take_damage(1 + self.damage_bonus, f[3] if len(f)>3 else 1, status_effect=True, element='fire')
+                        if e.take_damage(1 + self.damage_bonus, f[3] if len(f)>3 else 1, status_effect=True, element='fire'):
+                            hit_list.append(e)
             if f[2] <= 0:
                 self.flames.remove(f)
     def draw_effect(self, screen):
@@ -2270,10 +2272,43 @@ class IceMage(Character):
         
         if getattr(self.player, '_ice_brand_timer', 0) > 0 and self.player.swording > 0:
             p = self.player
-            center = (int(p.x + 20), int(p.y + 20))
-            offset_x = 40 * p.facing
-            pygame.draw.line(screen, (150, 255, 255), center, (center[0] + offset_x, center[1] - 30), 5)
-            pygame.draw.line(screen, (150, 255, 255), center, (center[0] + offset_x, center[1] + 30), 5)
+            cx = int(p.x + 20)
+            cy = int(p.y + 20)
+            # Two swords swinging in crossing arcs based on swing progress
+            max_swing = 15  # matches swording duration
+            progress = (max_swing - p.swording) / max_swing
+            base_angle = 0 if p.facing == 1 else 180
+            sword_len = 55
+            # Sword 1: swings from upper-back to lower-front
+            angle1 = base_angle + (-80 + 160 * progress) * p.facing
+            rad1 = math.radians(angle1)
+            ex1 = cx + sword_len * math.cos(rad1)
+            ey1 = cy + sword_len * math.sin(rad1)
+            # Sword 2: swings from lower-back to upper-front (delayed)
+            angle2 = base_angle + (80 - 160 * min(1.0, progress * 1.3)) * p.facing
+            rad2 = math.radians(angle2)
+            ex2 = cx + sword_len * math.cos(rad2)
+            ey2 = cy + sword_len * math.sin(rad2)
+            # Afterimage trails
+            for i in range(3):
+                trail_p = max(0, progress - i * 0.06)
+                ta1 = base_angle + (-80 + 160 * trail_p) * p.facing
+                tr1 = math.radians(ta1)
+                tx1 = cx + sword_len * math.cos(tr1)
+                ty1 = cy + sword_len * math.sin(tr1)
+                pygame.draw.line(screen, (100, 200, 255), (cx, cy), (int(tx1), int(ty1)), 2)
+                trail_p2 = max(0, min(1.0, progress * 1.3) - i * 0.06)
+                ta2 = base_angle + (80 - 160 * trail_p2) * p.facing
+                tr2 = math.radians(ta2)
+                tx2 = cx + sword_len * math.cos(tr2)
+                ty2 = cy + sword_len * math.sin(tr2)
+                pygame.draw.line(screen, (100, 200, 255), (cx, cy), (int(tx2), int(ty2)), 2)
+            # Main swords
+            pygame.draw.line(screen, (150, 255, 255), (cx, cy), (int(ex1), int(ey1)), 5)
+            pygame.draw.line(screen, (200, 255, 255), (cx, cy), (int(ex2), int(ey2)), 5)
+            # Sword tips glow
+            pygame.draw.circle(screen, (220, 255, 255), (int(ex1), int(ey1)), 4)
+            pygame.draw.circle(screen, (220, 255, 255), (int(ex2), int(ey2)), 4)
 
 # --- Player Class Definition ---
 class Player:
@@ -2301,6 +2336,7 @@ class Player:
         self.cooldown_speed_mult = 1.0 # Cooldown reduction multiplier
         self.hit_timer = 0            # Hit knockback/flashing timer
         self.prev_touch_up = False    # Jump input tracking for smartphone mode
+        self.attack_cooldown = 0      # Minimum cooldown between attacks (smartphone anti-spam)
 
 
 
@@ -2453,9 +2489,10 @@ class Player:
             if self.x <= 10: self.x = 10
             if self.x >= width - 40: self.x = width - 40
 
-        # Smartphone attack detection
+        # Smartphone attack detection (with 3-frame minimum cooldown)
 
-        if smartphone_mode and touch_keys['attack'] and self.swording <= 0:
+        if smartphone_mode and touch_keys['attack'] and self.swording <= 0 and self.attack_cooldown <= 0:
+            self.attack_cooldown = 3  # Minimum 3-frame interval between attacks
             if self.character:
                 self.character.attack(enemies)
             else:
@@ -2521,6 +2558,7 @@ class Player:
         if self.swording > 0: self.swording -= 1
         if self.hit_timer > 0: self.hit_timer -= 1
         if self.invincible_timer > 0: self.invincible_timer -= 1
+        if self.attack_cooldown > 0: self.attack_cooldown -= 1
         if self.character: self.character.update_timers()
 
     def take_damage(self, amount, source_facing=1):
@@ -2670,6 +2708,7 @@ class Enemy:
 
     def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None, ignore_iframes=False):
         if self.hp <= 0: return False
+        if self.spawn_timer > 0: return False  # Invulnerable during spawn animation
         
         # Elemental synergy
 
@@ -3765,6 +3804,11 @@ async def main():
                                     game_state = STATE_UPGRADE
                                     wave_clear_timer = 0
                             else:
+                                # Non-roguelike mode: heal 1 HP per stage, +5 max HP every 5 stages
+                                player.hp = min(player.max_hp, player.hp + 1)
+                                if wave_number > 0 and wave_number % 5 == 0:
+                                    player.max_hp += 5
+                                    player.hp = min(player.max_hp, player.hp + 5)
                                 start_next_wave()
                                 wave_clear_timer = 0
 
