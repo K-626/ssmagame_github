@@ -1427,7 +1427,7 @@ class JavelinThrowSkill(Skill):
             j[0] += j[2]
             j[3] -= 1
             if enemies:
-                er_rect = pygame.Rect(j[0], j[1] - 5, 40, 10)
+                er_rect = pygame.Rect(j[0], j[1] - 12, 40, 25)
                 for e in enemies:
                     if e.hp > 0 and e not in j[4] and er_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                         if e.take_damage(4 + self.damage_bonus, j[5]): # Piercing
@@ -1437,7 +1437,7 @@ class JavelinThrowSkill(Skill):
                 self.javelins.remove(j)
     def draw_effect(self, screen):
         for j in self.javelins:
-            pygame.draw.line(screen, (200, 255, 255), (j[0], j[1]), (j[0] + 40 * (1 if j[2]>0 else -1), j[1]), 4)
+            pygame.draw.line(screen, (200, 255, 255), (j[0], j[1]), (j[0] + 40 * (1 if j[2]>0 else -1), j[1]), 8)
 
 class VaultingStrikeSkill(Skill):
     def __init__(self, x, y):
@@ -1497,8 +1497,8 @@ class RapidThrustsSkill(Skill):
             if self.active_timer % 6 == 0: # Shortened hit interval (10->6)
 
                 if enemies and self.player_ref:
-                    hx = self.player_ref.x + (20 if self.player_ref.facing == 1 else -160)
-                    hitbox = pygame.Rect(hx, self.player_ref.y + 10, 180, 30) # Expanded hitbox
+                    hx = self.player_ref.x + (10 if self.player_ref.facing == 1 else -230)
+                    hitbox = pygame.Rect(hx, self.player_ref.y, 220, 45) # Expanded hitbox
 
                     for e in enemies:
                         if e.hp > 0 and hitbox.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
@@ -1509,10 +1509,10 @@ class RapidThrustsSkill(Skill):
                             e.x += (pull_x - e.x) * 0.2
     def draw_effect(self, screen):
         if self.active_timer > 0 and hasattr(self, 'player_ref') and self.player_ref:
-            for _ in range(3):
-                lx = self.player_ref.x + 20 + random.randint(0, 100) * self.player_ref.facing
-                ly = self.player_ref.y + 20 + random.randint(-10, 10)
-                pygame.draw.line(screen, (255, 255, 150), (self.player_ref.x+20, self.player_ref.y+20), (lx, ly), 2)
+            for _ in range(5): # Increased density
+                lx = self.player_ref.x + 20 + random.randint(0, 140) * self.player_ref.facing
+                ly = self.player_ref.y + 20 + random.randint(-22, 22)
+                pygame.draw.line(screen, (255, 255, 200), (self.player_ref.x+20, self.player_ref.y+20), (lx, ly), 3)
 
 class SweepingStrikeSkill(Skill):
     def __init__(self, x, y):
@@ -1654,14 +1654,20 @@ class Lancer(Character):
             self.thrusting -= 1
             if self.thrusting == 10: # Active frame
 
-                hx = self.player.x + (20 if self.player.facing == 1 else -140)
+                # Start hx slightly behind/at player center to ensure "entire spear" deals damage
+                if self.player.facing == 1:
+                    hx = self.player.x - 10 
+                else:
+                    hx = self.player.x + self.player.width + 10 - 210 # width(200) + offset(10)
+                
                 hy = self.player.y + 20
                 if enemies:
-                    spear_rect = pygame.Rect(hx, hy - 5, 160, 10) # Very long hitbox
+                    # Height 30px (hy-15 to hy+15), Width 210px (covering the full spear length)
+                    spear_rect = pygame.Rect(hx, hy - 15, 210, 30) 
                     for e in enemies:
                         if e.hp > 0 and e not in self.hit_enemies and spear_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                             # Normal damage
-                            if e.take_damage(2 * getattr(self.player, 'damage_multiplier', 1.0), self.player.facing, knockback_x=4): # Light knockback
+                            if e.take_damage(2 * getattr(self.player, 'damage_multiplier', 1.0), self.player.facing, knockback_x=5):
                                 # Poison Spear additional damage (10% of current HP per level)
                                 if self.player.poison_spear_level > 0:
                                     poison_dmg = e.hp * 0.1 * self.player.poison_spear_level
@@ -1679,11 +1685,11 @@ class Lancer(Character):
             px = self.player.x + 20
             py = self.player.y + 20
             progress = (15 - self.thrusting) / 15.0
-            reach = 180 * math.sin(progress * math.pi) # [Translated/Cleaned Comment]
+            reach = 220 * math.sin(progress * math.pi) 
             
             # [Translated/Cleaned Comment]
-            pygame.draw.line(screen, (255, 255, 255), (px, py), (px + (reach + 20) * self.player.facing, py), 6)
-            pygame.draw.line(screen, (100, 200, 255), (px, py), (px + reach * self.player.facing, py), 12)
+            pygame.draw.line(screen, (255, 255, 255), (px, py), (px + (reach + 30) * self.player.facing, py), 8)
+            pygame.draw.line(screen, (100, 200, 255), (px, py), (px + reach * self.player.facing, py), 16)
             
             # Tip flash
 
