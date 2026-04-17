@@ -973,12 +973,24 @@ class Character:
         
         # All skill classes defined in main.py
 
-        all_skills_classes = [MagicSwordSkill, ThunderSkill, IceEnchantSkill, FireEnchantSkill, BraveChargeSkill,
-                              HammerThrowSkill, SuperArmorSkill, EarthquakeSkill, WarCrySkill,
-                              LavaSkill, EruptionSkill, FlameDashSkill, MeteorSkill,
-                              PiercingArrowSkill, MirrorSkill, WarpArrowSkill, ArrowRainSkill, PinningArrowSkill,
-                              JavelinThrowSkill, VaultingStrikeSkill, RapidThrustsSkill, SweepingStrikeSkill, DragonDiveSkill,
-                              RisingStrikeSkill, DashStrikeSkill, EnhancedFireSkill]
+        all_skills_classes = [
+            # Magic Swordsman
+            MagicSwordSkill, ThunderSkill, IceEnchantSkill, FireEnchantSkill, BraveChargeSkill,
+            # Warrior
+            HammerThrowSkill, SuperArmorSkill, EarthquakeSkill, WarCrySkill,
+            # Pyromancer
+            LavaSkill, EruptionSkill, FlameDashSkill, MeteorSkill,
+            # Archer
+            PiercingArrowSkill, MirrorSkill, WarpArrowSkill, ArrowRainSkill, PinningArrowSkill,
+            # Lancer
+            JavelinThrowSkill, VaultingStrikeSkill, RapidThrustsSkill, SweepingStrikeSkill, DragonDiveSkill,
+            # Swordsman
+            RisingStrikeSkill, DashStrikeSkill, FireSkill, GravitySkill, IceSkill, DashSkill,
+            # MonsterBeta
+            PounceSkill, ScaleProjectileSkill, RoarSkill, AmpuleSkill, RampageSkill, EnhancedFireSkill,
+            # IceMage
+            AlHumaSkill, IceBrandArtsSkill, BlizzardLanceSkill, IceShieldSkill, CocytusSkill
+        ]
                               
         # List of candidate skills excluding already owned ones
 
@@ -1140,6 +1152,8 @@ class FlameDashSkill(Skill):
         self.player_ref = None
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
+            # Consume 1% of Max HP per use
+            player.hp -= player.max_hp * 0.01
             self.active_timer = 40 # Lasts 40 frames
             self.player_ref = player
             player.vy = -5
