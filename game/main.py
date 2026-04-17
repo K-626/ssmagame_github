@@ -739,23 +739,51 @@ class EarthquakeSkill(Skill):
         self.active_timer = 0; self.falling = False
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            player.vy = -30; self.player_ref = player; self.falling = True; return True
+            player.vy = -30; self.player_ref = player; self.falling = True; self.hit_enemies = []; return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
-        if self.active_timer > 0: self.active_timer -= 1
+        if self.active_timer > 0:
+            self.active_timer -= 1
+            if enemies:
+                for e in enemies:
+                    # Check grounded enemies (using a wider 50px margin for reliability)
+                    if e.hp > 0 and e not in self.hit_enemies and e.y + e.height >= ground - 50:
+                        # [Translated/Cleaned Comment]
+                        if e.take_damage(15, 1 if e.x > self.player_ref.x else -1, knockback_y=-12, element='heavy'):
+                            self.hit_enemies.append(e)
+
         if self.falling and self.player_ref:
-            if self.player_ref.vy > 10:
-                self.player_ref.vy = 25
-                if self.player_ref.y >= ground:
-                    self.falling = False; self.active_timer = 15
-                    if enemies:
-                        for e in enemies:
-                            # [Translated/Cleaned Comment]
-                            if e.hp > 0 and e.y + e.height >= ground - 5:
-                                e.take_damage(6, 1 if e.x > self.player_ref.x else -1, knockback_y=-10, element='heavy')
+            # Force high downward velocity during dive phase
+            if self.player_ref.vy > 0:
+                self.player_ref.vy = max(self.player_ref.vy, 25)
+
+            # Trigger on ground impact (only after we start falling)
+            if self.player_ref.vy >= 0 and self.player_ref.y + self.player_ref.height >= ground - 10:
+                self.falling = False
+                self.active_timer = 25 # Slightly longer visuals
+                self.hit_enemies = []
     def draw_effect(self, screen):
-        if self.active_timer > 0: pygame.draw.rect(screen, (255, 200, 100), (0, ground - 10, width, 20))
+        if self.active_timer > 0:
+            # Base ground shockwave
+            pygame.draw.rect(screen, (255, 200, 100), (0, ground - 10, width, 20))
+            
+            # Rising cracks / dust
+            duration = 25.0
+            prog = (duration - self.active_timer) / duration
+            for i in range(8): # Reduced from 12
+                x = (i * (width // 7)) + 50
+                # Dust clouds (subdued gray rects)
+                h = 10 + int(math.sin(i * 1.5) * 10)
+                dy = (ground - 10) - (prog * 30) # Slower rise
+                dust_alpha = int(180 * (1.0 - prog)) # More transparent
+                if dust_alpha > 0:
+                    d_surf = pygame.Surface((20, h), pygame.SRCALPHA)
+                    pygame.draw.rect(d_surf, (180, 180, 180, dust_alpha), (0, 0, 20, h))
+                    screen.blit(d_surf, (x - 10, dy))
+                
+                # Cracks (simple brown spots)
+                pygame.draw.circle(screen, (100, 80, 60), (x, int(ground + random.randint(2, 8))), 5)
 
 class WarCrySkill(Skill):
     def __init__(self, x, y):
@@ -792,6 +820,7 @@ class Character:
         self.upgrade_slots = 3           # [Translated/Cleaned Comment]
         self.current_upgrades = []       # [Translated/Cleaned Comment]
         self.queued_skill = None         # [Translated/Cleaned Comment]
+        self.current_boss_rewards = []
 
     def handle_event(self, event, enemies):
         if event.type == pygame.KEYDOWN:
@@ -806,7 +835,7 @@ class Character:
                     # [Translated/Cleaned Comment]
                     self.skills[i].activate(self.player, enemies)
 
-    def on_sword_hit(self, enemy, source_facing):
+    def on_sword_hit(self, enemy, source_facing, damage):
         """                               """
         for s in self.skills:
             # [Translated/Cleaned Comment]
@@ -816,6 +845,20 @@ class Character:
             if type(s).__name__ == "FireEnchantSkill" and getattr(s, 'active_timer', 0) > 0:
                 enemy.burn_timer = 180
                 enemy.take_damage(1, source_facing, status_effect=True, element='fire')
+
+
+
+        # Soul Sword: Heal 20% of damage per level
+        if self.player.soul_sword_level > 0:
+            heal_amt = damage * 0.2 * self.player.soul_sword_level
+            self.player.hp = min(self.player.max_hp, self.player.hp + heal_amt)
+
+        # Blood Sword: Hits increment and timer reset
+        if self.player.blood_sword_level > 0:
+            self.player.blood_sword_hits += 1
+            # Base 1s (60 frames), level extends it?
+            # "重ね掛けで効果時間延長"
+            self.player.blood_sword_timer = 60 + (self.player.blood_sword_level - 1) * 30
 
     def update(self, keys, enemies, cooldown_speed):
         """
@@ -950,6 +993,41 @@ class Character:
             
         # Randomly select from pool and store
         self.current_upgrades = random.sample(pool, min(self.upgrade_slots, len(pool)))
+
+    def generate_boss_rewards(self):
+        """Generates 3 special rewards after boss defeat"""
+        pool = [
+            {"type": "slot_plus", "name": "Choice Slot+", "desc": "Normal upgrade choices +1", "color": (100, 200, 255)},
+            {"type": "evolution", "name": "Evolution", "desc": "One skill Damage +3", "color": (255, 100, 100)},
+            {"type": "hero_blessing", "name": "Hero's Blessing", "desc": "Max HP+10, Heal, Def+1", "color": (255, 215, 0)},
+            {"type": "soul_sword", "name": "Soul Sword", "desc": "Heal 20% of damage dealt with sword hits (Stackable %)", "color": (150, 255, 150)},
+            {"type": "blood_sword", "name": "Blood Sword", "desc": "1.1x damage if hit again within 1s (Stackable duration)", "color": (255, 50, 50)},
+            {"type": "poison_spear", "name": "Poison Spear", "desc": "Deal 10% current HP on spear hits (Stackable %)", "color": (100, 255, 100)},
+            {"type": "thunder_mace", "name": "Thunder Mace", "desc": "10% chance for lightning on hammer hits (Stackable %/#)", "color": (255, 255, 100)}
+        ]
+        self.current_boss_rewards = random.sample(pool, 3)
+
+    def apply_boss_reward(self, reward):
+        """Applies a boss reward"""
+        if reward["type"] == "slot_plus":
+            self.upgrade_slots += 1
+        elif reward["type"] == "evolution":
+            if self.skills:
+                s = random.choice(self.skills)
+                s.damage_bonus += 3
+        elif reward["type"] == "hero_blessing":
+            self.player.max_hp += 10
+            self.player.hp = self.player.max_hp
+            self.player.defense += 1
+        elif reward["type"] == "soul_sword":
+            self.player.soul_sword_level += 1
+        elif reward["type"] == "blood_sword":
+            self.player.blood_sword_level += 1
+        elif reward["type"] == "poison_spear":
+            self.player.poison_spear_level += 1
+        elif reward["type"] == "thunder_mace":
+            self.player.thunder_mace_level += 1
+        return True
 
 
     def apply_upgrade(self, upgrade):
@@ -1149,6 +1227,7 @@ class Warrior(Character):
         self.skills = [self.skill_throw, self.skill_armor, self.skill_brave_charge, self.skill_earthquake, self.skill_warcry]
         self.hammering = 0
         self.hit_enemies = []
+        self.lightning_vfx = [] # List of [points, timer]
 
     def get_max_hp(self):
         return 15 # High HP
@@ -1185,6 +1264,11 @@ class Warrior(Character):
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
         
+        # Update lightning VFX
+        for vfx in self.lightning_vfx[:]:
+            vfx[1] -= 1
+            if vfx[1] <= 0: self.lightning_vfx.remove(vfx)
+        
         # Hammer collision detection
         if self.hammering > 0:
             self.hammering -= 1
@@ -1197,11 +1281,32 @@ class Warrior(Character):
                     for e in enemies:
                         if e.hp > 0 and e not in self.hit_enemies and hammer_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                             if e.take_damage(4 * self.player.damage_multiplier, self.player.facing, knockback_x=12, knockback_y=-8, element='heavy'): # High damage, large knockback
+                                # Thunder Mace effect
+                                if self.player.thunder_mace_level > 0:
+                                    if random.random() < 0.1 * self.player.thunder_mace_level:
+                                        # Strike N bolts
+                                        for _ in range(self.player.thunder_mace_level):
+                                            tx = e.x + e.width / 2 + random.randint(-20, 20)
+                                            e.take_damage(3, 0, ignore_iframes=True)
+                                            # Visual
+                                            pts = [(tx, 0)]
+                                            cy = 0
+                                            while cy < ground:
+                                                cy += random.randint(30, 60)
+                                                nx = tx + random.randint(-40, 40)
+                                                pts.append((nx, cy))
+                                            self.lightning_vfx.append([pts, 15])
+                                
                                 self.hit_enemies.append(e)
 
 
     def draw_effects(self, screen):
         super().draw_effects(screen)
+        
+        # Thunder Mace visuals
+        for vfx in self.lightning_vfx:
+            pts, timer = vfx
+            pygame.draw.lines(screen, (255, 255, 255), False, pts, 3)
         
         # Hammer rendering (stylized)
         if self.hammering > 0:
@@ -1293,11 +1398,11 @@ class Pyromancer(Character):
             if hit or fb[3] <= 0:
                 self.fireballs.remove(fb)
                 
-        # [Translated/Cleaned Comment]
+        # Extra flames while dashing with FlameDash active
         if self.skill_flamedash.flames and len(self.skill_flamedash.flames) > 0:
             if abs(self.player.vx) > 5 and self.player.invincible_timer > 0:
                 if random.random() < 0.5:
-                    self.skill_flamedash.flames.append([self.player.x, self.player.y, 60, self.player.facing])
+                    self.skill_flamedash.flames.append([self.player.x, self.player.y, 60, self.player.facing, []])
 
     def draw_effects(self, screen):
         super().draw_effects(screen)
@@ -1445,6 +1550,7 @@ class DragonDiveSkill(Skill):
         self.phase = 0 # 0: none, 1: rising, 2: diving
         self.player_ref = None
         self.source_facing = 0
+        self.hit_enemies = []
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
             self.phase = 1
@@ -1452,6 +1558,7 @@ class DragonDiveSkill(Skill):
             player.invincible_timer = 60
             self.player_ref = player
             self.source_facing = player.facing
+            self.hit_enemies = []
             return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
@@ -1466,15 +1573,24 @@ class DragonDiveSkill(Skill):
 
         elif self.phase == 2:
             # Left/right control during dive
-
             keys = pygame.key.get_pressed()
             move_speed = 10
             if keys[key_config['move_left']]:
                 self.player_ref.x -= move_speed
             if keys[key_config['move_right']]:
                 self.player_ref.x += move_speed
-                
-            if self.player_ref.y >= ground:
+            
+            # Falling hitbox
+            if enemies:
+                # Rect around player during dive
+                dive_rect = pygame.Rect(self.player_ref.x - 20, self.player_ref.y, 80, 100)
+                for e in enemies:
+                    if e.hp > 0 and e not in self.hit_enemies and dive_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+                        if e.take_damage(8 + self.damage_bonus, self.source_facing, element='heavy'):
+                            self.hit_enemies.append(e)
+
+            # Trigger on ground impact (using a generous 10px margin)
+            if self.player_ref.vy >= 0 and self.player_ref.y + self.player_ref.height >= ground - 10:
                 self.phase = 0
                 if enemies:
                     # Damage surrounding area on ground impact
@@ -1544,7 +1660,13 @@ class Lancer(Character):
                     spear_rect = pygame.Rect(hx, hy - 5, 160, 10) # Very long hitbox
                     for e in enemies:
                         if e.hp > 0 and e not in self.hit_enemies and spear_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            if e.take_damage(2, self.player.facing, knockback_x=4): # Light knockback
+                            # Normal damage
+                            if e.take_damage(2 * getattr(self.player, 'damage_multiplier', 1.0), self.player.facing, knockback_x=4): # Light knockback
+                                # Poison Spear additional damage (10% of current HP per level)
+                                if self.player.poison_spear_level > 0:
+                                    poison_dmg = e.hp * 0.1 * self.player.poison_spear_level
+                                    e.take_damage(poison_dmg, self.player.facing, status_effect=True, ignore_iframes=True)
+                                
                                 self.hit_enemies.append(e)
 
 
@@ -1726,9 +1848,9 @@ class MagicSwordsman(Character):
                 if event.key == key_config['skill_5']: self.skill_brave_charge.activate(self.player, enemies)
 
 
-    def on_sword_hit(self, enemy, source_facing):
+    def on_sword_hit(self, enemy, source_facing, damage):
         # [Translated/Cleaned Comment]
-        super().on_sword_hit(enemy, source_facing)
+        super().on_sword_hit(enemy, source_facing, damage)
             
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
@@ -2206,6 +2328,7 @@ class IceMage(Character):
         
         self.ice_blocks = []
         self.player._ice_brand_timer = 0
+        self.hit_enemies = []
         
     def get_max_hp(self): return 8
     def get_speed(self): return 1.2
@@ -2213,17 +2336,10 @@ class IceMage(Character):
 
     def attack(self, enemies):
         if getattr(self.player, '_ice_brand_timer', 0) > 0:
-            self.player.swording = 15
-            self.player.hit_timer = max(self.player.hit_timer, 20)
-            hx = self.player.x + (60 * self.player.facing)
-            hy = self.player.y + 20
-            if enemies:
-                sword_rect = pygame.Rect(hx - 40, hy - 40, 80, 80)
-                for e in enemies:
-                    if e.hp > 0:
-                        if sword_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            e.take_damage(int(2 + self.player.damage_multiplier), self.player.facing, element='ice')
-                            e.frozen_timer = max(e.frozen_timer if hasattr(e, 'frozen_timer') else 0, 30)
+            if self.player.swording <= 0:
+                self.player.swording = 25 # Slowed down from 15
+                self.hit_enemies = []
+                self.player.hit_timer = max(self.player.hit_timer, 20)
         else:
             vx = 20 * self.player.facing
             self.ice_blocks.append([self.player.x + 20, self.player.y + 20, vx, 40, self.player.facing])
@@ -2244,7 +2360,7 @@ class IceMage(Character):
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
         new_blocks = []
-        for b in self.ice_blocks:
+        for b in self.ice_blocks[:]:
             b[0] += b[2]
             b[3] -= 1
             hit = False
@@ -2255,10 +2371,45 @@ class IceMage(Character):
                             hit = True
                             break
             if hit or b[3] <= 0:
-                pass
-            else:
-                new_blocks.append(b)
-        self.ice_blocks = new_blocks
+                self.ice_blocks.remove(b)
+        
+        # Ice Brand Arts Sweep Hitbox
+        if getattr(self.player, '_ice_brand_timer', 0) > 0 and self.player.swording > 0:
+            p = self.player
+            cx, cy = p.x + 20, p.y + 20
+            max_swing = 25
+            progress = (max_swing - p.swording) / max_swing
+            base_angle = 0 if p.facing == 1 else 180
+            sword_len = 200
+            
+            # Arcs for both swords (Both downward, second one delayed)
+            # Starts top-back (-110), swings to bottom-front (80)
+            a1 = base_angle + (-110 + 190 * progress) * p.facing
+            
+            # Second sword delay (starts when first is 30% through)
+            progress2 = max(0, min(1.0, (progress - 0.3) / 0.7))
+            a2 = base_angle + (-110 + 190 * progress2) * p.facing
+            
+            # Damage calculation (including Blood Sword)
+            base_dmg = 2 + self.player.bonus_damage
+            blood_mult = 1.0
+            if p.blood_sword_level > 0 and p.blood_sword_hits > 0:
+                blood_mult = 1.1 ** p.blood_sword_hits
+            damage = int(base_dmg * blood_mult * getattr(p, 'damage_multiplier', 1.0))
+
+            # Check multiple points along both sword blades (increased density for 350 radius)
+            for angle in [a1, a2]:
+                rad = math.radians(angle)
+                for dist_step in range(1, 13):
+                    d = (sword_len * dist_step) / 12.0
+                    hx, hy = cx + d * math.cos(rad), cy + d * math.sin(rad)
+                    
+                    for e in enemies:
+                        if e.hp > 0 and e not in self.hit_enemies and e.x <= hx <= e.x + e.width and e.y <= hy <= e.y + e.height:
+                            if e.take_damage(damage, p.facing, element='ice'):
+                                self.hit_enemies.append(e)
+                                e.frozen_timer = max(e.frozen_timer, 30)
+                                self.on_sword_hit(e, p.facing, damage)
         
         if getattr(self.player, '_ice_brand_timer', 0) > 0:
             self.player.move_speed = 1.6
@@ -2274,41 +2425,56 @@ class IceMage(Character):
             p = self.player
             cx = int(p.x + 20)
             cy = int(p.y + 20)
-            # Two swords swinging in crossing arcs based on swing progress
-            max_swing = 15  # matches swording duration
+            max_swing = 25
             progress = (max_swing - p.swording) / max_swing
             base_angle = 0 if p.facing == 1 else 180
-            sword_len = 55
-            # Sword 1: swings from upper-back to lower-front
-            angle1 = base_angle + (-80 + 160 * progress) * p.facing
+            sword_len = 200
+            
+            # Arcs matching update() logic
+            # Sword 1
+            angle1 = base_angle + (-110 + 190 * progress) * p.facing
             rad1 = math.radians(angle1)
             ex1 = cx + sword_len * math.cos(rad1)
             ey1 = cy + sword_len * math.sin(rad1)
-            # Sword 2: swings from lower-back to upper-front (delayed)
-            angle2 = base_angle + (80 - 160 * min(1.0, progress * 1.3)) * p.facing
+            
+            # Sword 2 (Delayed)
+            progress2 = max(0, min(1.0, (progress - 0.3) / 0.7))
+            angle2 = base_angle + (-110 + 190 * progress2) * p.facing
             rad2 = math.radians(angle2)
             ex2 = cx + sword_len * math.cos(rad2)
             ey2 = cy + sword_len * math.sin(rad2)
+            
             # Afterimage trails
-            for i in range(3):
-                trail_p = max(0, progress - i * 0.06)
-                ta1 = base_angle + (-80 + 160 * trail_p) * p.facing
+            for i in range(4):
+                # Trail 1
+                trail_p1 = max(0, progress - i * 0.05)
+                ta1 = base_angle + (-110 + 190 * trail_p1) * p.facing
                 tr1 = math.radians(ta1)
                 tx1 = cx + sword_len * math.cos(tr1)
                 ty1 = cy + sword_len * math.sin(tr1)
-                pygame.draw.line(screen, (100, 200, 255), (cx, cy), (int(tx1), int(ty1)), 2)
-                trail_p2 = max(0, min(1.0, progress * 1.3) - i * 0.06)
-                ta2 = base_angle + (80 - 160 * trail_p2) * p.facing
+                t_alpha = 255 - i * 50
+                if t_alpha > 0:
+                    t_surf = pygame.Surface((width, height), pygame.SRCALPHA)
+                    pygame.draw.line(t_surf, (100, 200, 255, t_alpha), (cx, cy), (int(tx1), int(ty1)), 10 - i * 2)
+                    screen.blit(t_surf, (0, 0))
+
+                # Trail 2
+                trail_p2 = max(0, progress2 - i * 0.05)
+                ta2 = base_angle + (-110 + 190 * trail_p2) * p.facing
                 tr2 = math.radians(ta2)
                 tx2 = cx + sword_len * math.cos(tr2)
                 ty2 = cy + sword_len * math.sin(tr2)
-                pygame.draw.line(screen, (100, 200, 255), (cx, cy), (int(tx2), int(ty2)), 2)
-            # Main swords
-            pygame.draw.line(screen, (150, 255, 255), (cx, cy), (int(ex1), int(ey1)), 5)
-            pygame.draw.line(screen, (200, 255, 255), (cx, cy), (int(ex2), int(ey2)), 5)
+                if t_alpha > 0:
+                    t_surf = pygame.Surface((width, height), pygame.SRCALPHA)
+                    pygame.draw.line(t_surf, (100, 200, 255, t_alpha), (cx, cy), (int(tx2), int(ty2)), 10 - i * 2)
+                    screen.blit(t_surf, (0, 0))
+
+            # Main swords (Thicker lines)
+            pygame.draw.line(screen, (150, 255, 255), (cx, cy), (int(ex1), int(ey1)), 12)
+            pygame.draw.line(screen, (200, 255, 255), (cx, cy), (int(ex2), int(ey2)), 12)
             # Sword tips glow
-            pygame.draw.circle(screen, (220, 255, 255), (int(ex1), int(ey1)), 4)
-            pygame.draw.circle(screen, (220, 255, 255), (int(ex2), int(ey2)), 4)
+            pygame.draw.circle(screen, (220, 255, 255), (int(ex1), int(ey1)), 10)
+            pygame.draw.circle(screen, (220, 255, 255), (int(ex2), int(ey2)), 10)
 
 # --- Player Class Definition ---
 class Player:
@@ -2343,6 +2509,14 @@ class Player:
         self.character = None         # Active character class instance
         self.invincible_timer = 0     # Invincibility timer
         self.reincarnator_mode = False # Stores Reincarnator mode setting
+
+        # New Boss Rewards State
+        self.soul_sword_level = 0
+        self.blood_sword_level = 0
+        self.blood_sword_timer = 0
+        self.blood_sword_hits = 0
+        self.poison_spear_level = 0
+        self.thunder_mace_level = 0
 
         self.skill_m = MirrorSkill(15, 15)
         self.skill_g = GravitySkill(75, 15)
@@ -2391,6 +2565,12 @@ class Player:
         self.jump_count_max = 2
         self.character = None
         self.reincarnator_mode = False
+        self.soul_sword_level = 0
+        self.blood_sword_level = 0
+        self.blood_sword_timer = 0
+        self.blood_sword_hits = 0
+        self.poison_spear_level = 0
+        self.thunder_mace_level = 0
         self.skills = [self.skill_m, self.skill_g, self.skill_i, self.skill_d, self.skill_l, self.skill_f, self.skill_t]
 
     def update(self, keys, enemies):
@@ -2499,9 +2679,19 @@ class Player:
                 self.swording = 12
 
 
-        if self.swording > 0:
+        # Hide standard sword if Ice Brand is active
+        ice_brand_active = getattr(self, '_ice_brand_timer', 0) > 0 and self.character and type(self.character).__name__ == "IceMage"
+
+        if self.swording > 0 and not ice_brand_active:
             is_critical = abs(self.vx) > 10
-            damage = (2 if is_critical else 1) + self.bonus_damage
+            base_dmg = (2 if is_critical else 1) + self.bonus_damage
+            
+            # Blood Sword multiplier
+            blood_mult = 1.0
+            if self.blood_sword_level > 0 and self.blood_sword_hits > 0:
+                blood_mult = 1.1 ** self.blood_sword_hits
+            
+            damage = int(base_dmg * blood_mult * getattr(self, 'damage_multiplier', 1.0))
             p_center_x = self.x + 20 * self.facing + 20
             p_center_y = self.y + 20
             swing_progress = (12 - self.swording) / 12.0
@@ -2521,7 +2711,7 @@ class Player:
                         if e.take_damage(damage, self.facing):
                             hit_any = True
                             hit_stop_timer = 8 if is_critical else 4
-                            if self.character: self.character.on_sword_hit(e, self.facing)
+                            if self.character: self.character.on_sword_hit(e, self.facing, damage)
                             break
                 if hit_any: break
         
@@ -2543,7 +2733,10 @@ class Player:
                 s.draw_effect(screen)
                 s.draw(screen)
         
-        if self.swording > 0:
+        # Hide standard sword if Ice Brand is active
+        ice_brand_active = getattr(self, '_ice_brand_timer', 0) > 0 and self.character and type(self.character).__name__ == "IceMage"
+
+        if self.swording > 0 and not ice_brand_active:
             p_center_x = self.x + 20 * self.facing + 20
             p_center_y = self.y + 20
             swing_progress = (12 - self.swording) / 12.0
@@ -2559,6 +2752,13 @@ class Player:
         if self.hit_timer > 0: self.hit_timer -= 1
         if self.invincible_timer > 0: self.invincible_timer -= 1
         if self.attack_cooldown > 0: self.attack_cooldown -= 1
+
+        # Blood Sword timer
+        if self.blood_sword_timer > 0:
+            self.blood_sword_timer -= 1
+            if self.blood_sword_timer <= 0:
+                self.blood_sword_hits = 0
+
         if self.character: self.character.update_timers()
 
     def take_damage(self, amount, source_facing=1):
@@ -3186,6 +3386,8 @@ class SniperEnemy(Enemy):
         self.aim_timer = 0
         self.aim_angle = 0
         self.shoot_cooldown = 240
+        self.beam_timer = 0
+        self.beam_data = None # [start, end]
 
     def _update_physics(self):
         self.vy = 0
@@ -3208,14 +3410,30 @@ class SniperEnemy(Enemy):
             self.x += self.speed * 0.5 * self.facing
         # Snipe: Warning -> Shoot stages
 
+        if self.beam_timer > 0: self.beam_timer -= 1
+
         if self.aim_timer > 0:
             self.aim_timer -= 1
             self.aim_angle = math.atan2(player.y + 20 - (self.y + 20), player.x + 20 - (self.x + 20))
             if self.aim_timer == 0:
-                enemy_bullets.append(EnemyBullet(self.x + 20, self.y + 20, self.aim_angle, self.attack_damage))
-                self.shoot_cooldown = 240
+                # Beam Fire!
+                sx, sy = self.x + 20, self.y + 20
+                dist = 800
+                ex, ey = sx + math.cos(self.aim_angle) * dist, sy + math.sin(self.aim_angle) * dist
+                self.beam_data = [(sx, sy), (ex, ey)]
+                self.beam_timer = 12 # 0.2s at 60fps
+                
+                # Instant damage check
+                # Sample points along the beam
+                for d in range(0, dist, 20):
+                    px, py = sx + math.cos(self.aim_angle) * d, sy + math.sin(self.aim_angle) * d
+                    if player.x <= px <= player.x + player.width and player.y <= py <= player.y + player.height:
+                        player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
+                        break
+                
+                self.shoot_cooldown = 180 # Slightly faster cooldown too
         elif self.shoot_cooldown <= 0:
-            self.aim_timer = 60
+            self.aim_timer = 20 # Very short aim time
         else:
             self.shoot_cooldown -= 1
         # Contact damage
@@ -3229,13 +3447,18 @@ class SniperEnemy(Enemy):
         if self.spawn_timer > 0 or self.hp <= 0: return
         # Warning line (laser sight)
         if self.aim_timer > 0:
-
             sx, sy = int(self.x + 20), int(self.y + 20)
-            ex = sx + int(math.cos(self.aim_angle) * 600)
-            ey = sy + int(math.sin(self.aim_angle) * 600)
+            ex = sx + int(math.cos(self.aim_angle) * 800)
+            ey = sy + int(math.sin(self.aim_angle) * 800)
             blink = self.aim_timer % 6 < 3
             color = (255, 0, 0) if blink else (200, 50, 50)
             pygame.draw.line(screen, color, (sx, sy), (ex, ey), 2)
+        
+        # Actual Beam (White Trail)
+        if self.beam_timer > 0 and self.beam_data:
+            pygame.draw.line(screen, (255, 255, 255), self.beam_data[0], self.beam_data[1], 8)
+            # Add some glow
+            pygame.draw.line(screen, (200, 200, 255), self.beam_data[0], self.beam_data[1], 15)
         # Aim mark
 
         cx = int(self.x + self.width // 2)
@@ -3384,16 +3607,25 @@ def start_next_wave():
     
     # Non-Reincarnator modes scale half as fast
     
-    # Enemy scaling: every 2 waves after W20, every wave after W40
+    # Enemy scaling: every 2 waves after W20, every wave after W40, exponential after W100
     if wave_number < 20:
         hp_bonus = wave_number // 3
         atk_bonus = wave_number // 4
     elif wave_number < 40:
         hp_bonus = (20 // 3) + (wave_number - 20) // 2
         atk_bonus = (20 // 4) + (wave_number - 20) // 2
-    else:
+    elif wave_number < 100:
         hp_bonus = (20 // 3) + (20 // 2) + (wave_number - 40)
         atk_bonus = (20 // 4) + (20 // 2) + (wave_number - 40)
+    else:
+        # After wave 100: base linear + slight exponential growth
+        base_hp = (20 // 3) + (20 // 2) + 60  # linear value at wave 100
+        base_atk = (20 // 4) + (20 // 2) + 60
+        extra_waves = wave_number - 100
+        # Very gentle exponential: 1.008^n multiplier
+        exp_mult = 1.008 ** extra_waves
+        hp_bonus = int((base_hp + extra_waves) * exp_mult)
+        atk_bonus = int((base_atk + extra_waves) * exp_mult)
     
     if not is_reincarnMode:
         hp_bonus = hp_bonus // 2
@@ -3659,26 +3891,16 @@ async def main():
                     start_x = (width - total_w) // 2
                     start_y = height // 2 - card_h // 2
                     
-                    for i in range(3):
-                        rect = pygame.Rect(start_x + i * (card_w + spacing), start_y, card_w, card_h)
-                        if rect.collidepoint(mx, my):
-                            # Apply reward
-                            if i == 0: # Increase upgrade slots
-                                player.character.upgrade_slots += 1
-                            elif i == 1: # Skill evolution
-                                # [Translated/Cleaned Comment]
-                                # User requested "1 skill evolution", so randomly enhance one owned skill
-                                if player.character.skills:
-                                    s = random.choice(player.character.skills)
-                                    s.damage_bonus += 3
-                            elif i == 2: # Hero's Blessing
-                                player.max_hp += 10
-                                player.hp = player.max_hp
-                                player.defense += 1
-                            
-                            start_next_wave()
-                            game_state = STATE_PLAYING
-                            break
+                    if hasattr(player.character, 'current_boss_rewards') and player.character.current_boss_rewards:
+                        for i in range(len(player.character.current_boss_rewards)):
+                            rect = pygame.Rect(start_x + i * (card_w + spacing), start_y, card_w, card_h)
+                            if rect.collidepoint(mx, my):
+                                # Apply randomized reward
+                                reward = player.character.current_boss_rewards[i]
+                                player.character.apply_boss_reward(reward)
+                                start_next_wave()
+                                game_state = STATE_PLAYING
+                                break
 
             elif game_state == STATE_REPLACE_SKILL:
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -3797,6 +4019,7 @@ async def main():
                             if is_reincarn:
                                 if wave_number > 0 and wave_number % 5 == 0:
                                     # Special reward after boss defeat
+                                    player.character.generate_boss_rewards()
                                     game_state = STATE_BOSS_REWARD
                                     wave_clear_timer = 0
                                 else:
@@ -3921,11 +4144,7 @@ async def main():
             
             rewards = []
             if game_state == STATE_BOSS_REWARD:
-                rewards = [
-                    {"name": "Choice Slot+", "desc": "Normal upgrade choices +1", "color": (100, 200, 255)},
-                    {"name": "Evolution", "desc": "One skill Damage +3", "color": (255, 100, 100)},
-                    {"name": "Hero's Blessing", "desc": "Max HP+10, Heal, Def+1", "color": (255, 215, 0)}
-                ]
+                rewards = player.character.current_boss_rewards if hasattr(player.character, 'current_boss_rewards') else []
             else:
                 if hasattr(player.character, 'current_upgrades'):
                     color_mapping = {
