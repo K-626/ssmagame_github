@@ -736,10 +736,20 @@ class SuperArmorSkill(Skill):
 class EarthquakeSkill(Skill):
     def __init__(self, x, y):
         super().__init__(x, y, 480, (150, 100, 50), (100, 50, 0))
-        self.active_timer = 0; self.falling = False
+        self.active_timer = 0
+        self.phase = 0  # 0: none, 1: rising, 2: diving
+        self.player_ref = None
+        self.source_facing = 0
+        self.hit_enemies = []
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            player.vy = -30; self.player_ref = player; self.falling = True; self.hit_enemies = []; return True
+            self.phase = 1
+            player.vy = -30
+            player.invincible_timer = 60
+            self.player_ref = player
+            self.source_facing = player.facing
+            self.hit_enemies = []
+            return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
@@ -747,23 +757,47 @@ class EarthquakeSkill(Skill):
             self.active_timer -= 1
             if enemies:
                 for e in enemies:
-                    # Check grounded enemies (using a wider 50px margin for reliability)
                     if e.hp > 0 and e not in self.hit_enemies and e.y + e.height >= ground - 50:
-                        # [Translated/Cleaned Comment]
                         if e.take_damage(15, 1 if e.x > self.player_ref.x else -1, knockback_y=-12, element='heavy'):
                             self.hit_enemies.append(e)
 
-        if self.falling and self.player_ref:
-            # Force high downward velocity during dive phase
-            if self.player_ref.vy > 0:
-                self.player_ref.vy = max(self.player_ref.vy, 25)
+        if self.phase == 1:
+            self.player_ref.vx = 0  # Rising straight up
+            if self.player_ref.vy > -5:  # Near end of ascent
+                self.phase = 2
+                self.player_ref.vy = 50  # Dive speed
 
-            # Trigger on ground impact (only after we start falling)
+        elif self.phase == 2:
+            # Left/right control during dive
+            keys = pygame.key.get_pressed()
+            move_speed = 10
+            if keys[key_config['move_left']]:
+                self.player_ref.x -= move_speed
+            if keys[key_config['move_right']]:
+                self.player_ref.x += move_speed
+
+            # Falling hitbox
+            if enemies:
+                dive_rect = pygame.Rect(self.player_ref.x - 20, self.player_ref.y, 80, 100)
+                for e in enemies:
+                    if e.hp > 0 and e not in self.hit_enemies and dive_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+                        if e.take_damage(8 + self.damage_bonus, self.source_facing, element='heavy'):
+                            self.hit_enemies.append(e)
+
+            # Trigger on ground impact
             if self.player_ref.vy >= 0 and self.player_ref.y + self.player_ref.height >= ground - 10:
-                self.falling = False
-                self.active_timer = 25 # Slightly longer visuals
+                self.phase = 0
+                self.active_timer = 25
                 self.hit_enemies = []
+                if enemies:
+                    blast = pygame.Rect(self.player_ref.x - 120, self.player_ref.y - 60, 280, 110)
+                    for e in enemies:
+                        if e.hp > 0 and blast.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+                            e.take_damage(15 + self.damage_bonus, self.source_facing, knockback_y=-12, element='heavy')
     def draw_effect(self, screen):
+        if (self.phase == 1 or self.phase == 2) and self.player_ref:
+            pygame.draw.circle(screen, (200, 150, 50), (int(self.player_ref.x+20), int(self.player_ref.y+20)), 25)
+            pygame.draw.polygon(screen, (150, 100, 20), [(self.player_ref.x+20, self.player_ref.y-20), (self.player_ref.x+50, self.player_ref.y+50), (self.player_ref.x-10, self.player_ref.y+50)])
         if self.active_timer > 0:
             # Base ground shockwave
             pygame.draw.rect(screen, (255, 200, 100), (0, ground - 10, width, 20))
@@ -771,18 +805,16 @@ class EarthquakeSkill(Skill):
             # Rising cracks / dust
             duration = 25.0
             prog = (duration - self.active_timer) / duration
-            for i in range(8): # Reduced from 12
+            for i in range(8):
                 x = (i * (width // 7)) + 50
-                # Dust clouds (subdued gray rects)
                 h = 10 + int(math.sin(i * 1.5) * 10)
-                dy = (ground - 10) - (prog * 30) # Slower rise
-                dust_alpha = int(180 * (1.0 - prog)) # More transparent
+                dy = (ground - 10) - (prog * 30)
+                dust_alpha = int(180 * (1.0 - prog))
                 if dust_alpha > 0:
                     d_surf = pygame.Surface((20, h), pygame.SRCALPHA)
                     pygame.draw.rect(d_surf, (180, 180, 180, dust_alpha), (0, 0, 20, h))
                     screen.blit(d_surf, (x - 10, dy))
                 
-                # Cracks (simple brown spots)
                 pygame.draw.circle(screen, (100, 80, 60), (x, int(ground + random.randint(2, 8))), 5)
 
 class WarCrySkill(Skill):
@@ -2464,30 +2496,30 @@ class IceMage(Character):
             ex2 = cx + sword_len * math.cos(rad2)
             ey2 = cy + sword_len * math.sin(rad2)
             
-            # Afterimage trails
-            for i in range(4):
+            # Afterimage trails (single surface for all trails)
+            trail_surf = pygame.Surface((sword_len * 2 + 40, sword_len * 2 + 40), pygame.SRCALPHA)
+            tc_x = sword_len + 20
+            tc_y = sword_len + 20
+            for i in range(3):
                 # Trail 1
-                trail_p1 = max(0, progress - i * 0.05)
+                trail_p1 = max(0, progress - i * 0.06)
                 ta1 = base_angle + (-110 + 190 * trail_p1) * p.facing
                 tr1 = math.radians(ta1)
-                tx1 = cx + sword_len * math.cos(tr1)
-                ty1 = cy + sword_len * math.sin(tr1)
-                t_alpha = 255 - i * 50
+                tx1 = tc_x + sword_len * math.cos(tr1)
+                ty1 = tc_y + sword_len * math.sin(tr1)
+                t_alpha = 200 - i * 60
                 if t_alpha > 0:
-                    t_surf = pygame.Surface((width, height), pygame.SRCALPHA)
-                    pygame.draw.line(t_surf, (100, 200, 255, t_alpha), (cx, cy), (int(tx1), int(ty1)), 10 - i * 2)
-                    screen.blit(t_surf, (0, 0))
+                    pygame.draw.line(trail_surf, (100, 200, 255, t_alpha), (tc_x, tc_y), (int(tx1), int(ty1)), 8 - i * 2)
 
                 # Trail 2
-                trail_p2 = max(0, progress2 - i * 0.05)
+                trail_p2 = max(0, progress2 - i * 0.06)
                 ta2 = base_angle + (-110 + 190 * trail_p2) * p.facing
                 tr2 = math.radians(ta2)
-                tx2 = cx + sword_len * math.cos(tr2)
-                ty2 = cy + sword_len * math.sin(tr2)
+                tx2 = tc_x + sword_len * math.cos(tr2)
+                ty2 = tc_y + sword_len * math.sin(tr2)
                 if t_alpha > 0:
-                    t_surf = pygame.Surface((width, height), pygame.SRCALPHA)
-                    pygame.draw.line(t_surf, (100, 200, 255, t_alpha), (cx, cy), (int(tx2), int(ty2)), 10 - i * 2)
-                    screen.blit(t_surf, (0, 0))
+                    pygame.draw.line(trail_surf, (100, 200, 255, t_alpha), (tc_x, tc_y), (int(tx2), int(ty2)), 8 - i * 2)
+            screen.blit(trail_surf, (cx - tc_x, cy - tc_y))
 
             # Main swords (Thicker lines)
             pygame.draw.line(screen, (150, 255, 255), (cx, cy), (int(ex1), int(ey1)), 12)
