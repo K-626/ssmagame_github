@@ -952,6 +952,8 @@ class Character:
             'DashSkill': 'Dash', 'GravitySkill': 'Gravity',
             'PounceSkill': 'Pounce', 'ScaleProjectileSkill': 'Scale Blade',
             'RoarSkill': 'Roar', 'AmpuleSkill': 'Ampule', 'RampageSkill': 'Rampage',
+            'BlackHoleSkill': 'Black Hole', 'ElMinyaSkill': 'El Minya', 'DarkPulseSkill': 'Dark Pulse',
+            'ShadowStepSkill': 'Shadow Step', 'AbyssRaySkill': 'Abyss Ray',
         }
 
         skill_keys = ['J', 'K', 'L', 'N', 'M']
@@ -1021,7 +1023,9 @@ class Character:
             # MonsterBeta
             PounceSkill, ScaleProjectileSkill, RoarSkill, AmpuleSkill, RampageSkill, EnhancedFireSkill,
             # IceMage
-            AlHumaSkill, IceBrandArtsSkill, BlizzardLanceSkill, IceShieldSkill, CocytusSkill
+            AlHumaSkill, IceBrandArtsSkill, BlizzardLanceSkill, IceShieldSkill, CocytusSkill,
+            # DarkMage
+            BlackHoleSkill, ElMinyaSkill, DarkPulseSkill, ShadowStepSkill, AbyssRaySkill
         ]
                               
         # List of candidate skills excluding already owned ones
@@ -2528,6 +2532,270 @@ class IceMage(Character):
             pygame.draw.circle(screen, (220, 255, 255), (int(ex1), int(ey1)), 10)
             pygame.draw.circle(screen, (220, 255, 255), (int(ex2), int(ey2)), 10)
 
+class BlackHoleSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 600, (100, 0, 150), (50, 0, 100))
+        self.active_timer = 0
+        self.bh_x = 0
+        self.bh_y = 0
+        self.pull_range = 500
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            self.active_timer = 180
+            self.bh_x = player.x + 150 * player.facing
+            self.bh_y = player.y
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        if self.active_timer > 0:
+            self.active_timer -= 1
+            if enemies:
+                for e in enemies:
+                    if e.hp > 0:
+                        dx = self.bh_x - (e.x + e.width/2)
+                        dy = self.bh_y - (e.y + e.height/2)
+                        dist = math.hypot(dx, dy)
+                        if dist < self.pull_range and dist > 30:
+                            e.x += (dx / dist) * 4
+                            e.y += (dy / dist) * 4
+            if self.active_timer == 0:
+                if enemies:
+                    for e in enemies:
+                        if e.hp > 0:
+                            dx = self.bh_x - (e.x + e.width/2)
+                            dy = self.bh_y - (e.y + e.height/2)
+                            if math.hypot(dx, dy) < 250:
+                                e.take_damage(10 + self.damage_bonus, 1 if dx < 0 else -1, element='dark', ignore_iframes=True)
+    def draw_effect(self, screen):
+        if self.active_timer > 0:
+            radius = 60 + math.sin(pygame.time.get_ticks() * 0.01) * 15
+            pygame.draw.circle(screen, (30, 0, 50), (int(self.bh_x), int(self.bh_y)), radius)
+            pygame.draw.circle(screen, (100, 0, 150), (int(self.bh_x), int(self.bh_y)), radius + 15, 2)
+
+class ElMinyaSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 360, (200, 0, 255), (100, 0, 200))
+        self.bullets = []
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            vx = 15 * player.facing
+            self.bullets.append([player.x + 20, player.y + 10, vx, 0, 60, False])
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        new_bullets = []
+        for b in self.bullets:
+            if b[5] and enemies:
+                target = None
+                min_dist = float('inf')
+                for e in enemies:
+                    if e.hp > 0:
+                        dist = math.hypot(e.x+e.width/2 - b[0], e.y+e.height/2 - b[1])
+                        if dist < min_dist: min_dist = dist; target = e
+                if target:
+                    dx = target.x + target.width/2 - b[0]
+                    dy = target.y + target.height/2 - b[1]
+                    d = max(1, math.hypot(dx, dy))
+                    b[2] = (b[2] * 4 + (dx/d)*12) / 5
+                    b[3] = (b[3] * 4 + (dy/d)*12) / 5
+            b[0] += b[2]
+            b[1] += b[3]
+            b[4] -= 1
+            hit = False
+            split_trigger = False
+            if enemies:
+                for e in enemies:
+                    if e.hp > 0 and e.x <= b[0] <= e.x + e.width and e.y <= b[1] <= e.y + e.height:
+                        e.take_damage(5 if not b[5] else 2 + self.damage_bonus, 1 if b[2] > 0 else -1, element='dark', ignore_iframes=True)
+                        hit = True
+                        if not b[5]: split_trigger = True
+                        break
+            if b[1] > ground:
+                hit = True
+                if not b[5]: split_trigger = True
+            if b[4] <= 0:
+                if not b[5]: split_trigger = True
+                else: hit = True
+            if split_trigger and not b[5]:
+                for i in range(5):
+                    angle = math.radians(random.randint(0, 360))
+                    speed = random.uniform(8, 12)
+                    new_bullets.append([b[0], b[1], math.cos(angle)*speed, math.sin(angle)*speed, 40, True])
+            if not hit and not split_trigger and -100 < b[0] < width + 100:
+                new_bullets.append(b)
+        self.bullets = new_bullets
+    def draw_effect(self, screen):
+        for b in self.bullets:
+            radius = 4 if b[5] else 8
+            pygame.draw.circle(screen, (200, 0, 255), (int(b[0]), int(b[1])), radius)
+
+class DarkPulseSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 480, (50, 0, 100), (30, 0, 50))
+        self.active_timer = 0
+        self.pulse_radius = 0
+        self.player_ref = None
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            self.active_timer = 20
+            self.pulse_radius = 0
+            self.player_ref = player
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        if self.active_timer > 0:
+            self.active_timer -= 1
+            self.pulse_radius += 15
+            if self.active_timer == 10 and self.player_ref and enemies:
+                for e in enemies:
+                    if e.hp > 0:
+                        dx = (e.x + e.width/2) - (self.player_ref.x + 20)
+                        dy = (e.y + e.height/2) - (self.player_ref.y + 20)
+                        if math.hypot(dx, dy) < 300:
+                            e.take_damage(8 + self.damage_bonus, 1 if dx > 0 else -1, knockback_x=15, knockback_y=-5, element='dark', ignore_iframes=True)
+                            e.darkness_timer = 300
+    def draw_effect(self, screen):
+        if self.active_timer > 0 and self.player_ref:
+            pygame.draw.circle(screen, (100, 0, 200), (int(self.player_ref.x + 20), int(self.player_ref.y + 20)), self.pulse_radius, 5)
+
+class ShadowStepSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 300, (80, 80, 100), (40, 40, 60))
+        self.explosions = []
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            self.explosions.append([player.x + 20, player.y + 20, 15])
+            player.x += 150 * player.facing
+            if player.x < 0: player.x = 0
+            if player.x > width - player.width: player.x = width - player.width
+            player.invincible_timer = 15
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        new_exp = []
+        for exp in self.explosions:
+            exp[2] -= 1
+            if exp[2] == 5 and enemies:
+                for e in enemies:
+                    if e.hp > 0:
+                        dx = (e.x + e.width/2) - exp[0]
+                        dy = (e.y + e.height/2) - exp[1]
+                        if math.hypot(dx, dy) < 80:
+                            e.take_damage(6 + self.damage_bonus, 1 if dx > 0 else -1, element='dark', ignore_iframes=True)
+            if exp[2] > 0:
+                new_exp.append(exp)
+        self.explosions = new_exp
+    def draw_effect(self, screen):
+        for exp in self.explosions:
+            radius = (15 - exp[2]) * 5
+            pygame.draw.circle(screen, (50, 0, 100), (int(exp[0]), int(exp[1])), radius, 3)
+
+class AbyssRaySkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 900, (150, 0, 255), (80, 0, 150))
+        self.active_timer = 0
+        self.player_ref = None
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            self.active_timer = 60
+            self.player_ref = player
+            player.vx = 0
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        if self.active_timer > 0:
+            self.active_timer -= 1
+            if self.active_timer % 10 == 0 and self.player_ref and enemies:
+                beam_width = width
+                beam_y = self.player_ref.y
+                if self.player_ref.facing == 1:
+                    beam_rect = pygame.Rect(self.player_ref.x + 20, beam_y, beam_width, 40)
+                else:
+                    beam_rect = pygame.Rect(self.player_ref.x + 20 - beam_width, beam_y, beam_width, 40)
+                for e in enemies:
+                    if e.hp > 0 and beam_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+                        e.take_damage(2 + self.damage_bonus, self.player_ref.facing, element='dark', ignore_iframes=True)
+    def draw_effect(self, screen):
+        if self.active_timer > 0 and self.player_ref:
+            beam_width = width
+            beam_y = int(self.player_ref.y)
+            if self.player_ref.facing == 1:
+                rect = (int(self.player_ref.x + 20), beam_y, beam_width, 40)
+            else:
+                rect = (int(self.player_ref.x + 20 - beam_width), beam_y, beam_width, 40)
+            pygame.draw.rect(screen, (150, 0, 255), rect)
+            if self.player_ref.facing == 1:
+                core_rect = (int(self.player_ref.x + 20), beam_y + 10, beam_width, 20)
+            else:
+                core_rect = (int(self.player_ref.x + 20 - beam_width), beam_y + 10, beam_width, 20)
+            pygame.draw.rect(screen, (255, 255, 255), core_rect)
+
+class DarkMage(Character):
+    """Dark Mage: Uses dark magic, black holes, and lasers."""
+    def __init__(self, player):
+        super().__init__(player)
+        self.skill_blackhole = BlackHoleSkill(15, 15)
+        self.skill_elminya = ElMinyaSkill(75, 15)
+        self.skill_darkpulse = DarkPulseSkill(135, 15)
+        self.skill_shadowstep = ShadowStepSkill(195, 15)
+        self.skill_abyssray = AbyssRaySkill(255, 15)
+        self.skills = [self.skill_blackhole, self.skill_elminya, self.skill_darkpulse, self.skill_shadowstep, self.skill_abyssray]
+        self.crystals = []
+        
+    def get_max_hp(self): return 8
+    def get_speed(self): return 1.1
+    def get_jump_power(self): return -14
+
+    def attack(self, enemies):
+        self.player.swording = 15
+        vx = 22 * self.player.facing
+        self.crystals.append([self.player.x + 20, self.player.y + 15, vx])
+
+    def handle_event(self, event, enemies):
+        super().handle_event(event, enemies)
+        if event.type == pygame.KEYDOWN:
+            if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
+                self.player.vy = self.player.jump_power
+                self.player.jumpcount -= 1
+            if not self.is_reincarnator_mode:
+                if event.key == key_config['skill_1']: self.skill_blackhole.activate(self.player, enemies)
+                if event.key == key_config['skill_2']: self.skill_elminya.activate(self.player, enemies)
+                if event.key == key_config['skill_3']: self.skill_darkpulse.activate(self.player, enemies)
+                if event.key == key_config['skill_4']: self.skill_shadowstep.activate(self.player, enemies)
+                if event.key == key_config['skill_5']: self.skill_abyssray.activate(self.player, enemies)
+
+    def update(self, keys, enemies, cooldown_speed):
+        super().update(keys, enemies, cooldown_speed)
+        new_crystals = []
+        for c in self.crystals:
+            c[0] += c[2]
+            hit = False
+            if enemies:
+                for e in enemies:
+                    if e.hp > 0 and e.x < c[0] < e.x + e.width and e.y < c[1] < e.y + e.height:
+                        e.take_damage(2 + self.player.bonus_damage, 1 if c[2] > 0 else -1, element='dark', ignore_iframes=True)
+                        hit = True
+                        break
+            if not hit and -100 < c[0] < width + 100:
+                new_crystals.append(c)
+        self.crystals = new_crystals
+
+    def draw_effects(self, screen):
+        super().draw_effects(screen)
+        for c in self.crystals:
+            points = [
+                (c[0] + 10, c[1]),
+                (c[0], c[1] + 5),
+                (c[0] - 10, c[1]),
+                (c[0], c[1] - 5)
+            ]
+            pygame.draw.polygon(screen, (200, 100, 255), points)
+
 # --- Player Class Definition ---
 class Player:
     """
@@ -2733,8 +3001,9 @@ class Player:
 
         # Hide standard sword if Ice Brand is active
         ice_brand_active = getattr(self, '_ice_brand_timer', 0) > 0 and self.character and type(self.character).__name__ == "IceMage"
+        dark_mage_active = self.character and type(self.character).__name__ == "DarkMage"
 
-        if self.swording > 0 and not ice_brand_active:
+        if self.swording > 0 and not ice_brand_active and not dark_mage_active:
             is_critical = abs(self.vx) > 10
             base_dmg = (2 if is_critical else 1) + self.bonus_damage
             
@@ -2787,8 +3056,9 @@ class Player:
         
         # Hide standard sword if Ice Brand is active
         ice_brand_active = getattr(self, '_ice_brand_timer', 0) > 0 and self.character and type(self.character).__name__ == "IceMage"
+        dark_mage_active = self.character and type(self.character).__name__ == "DarkMage"
 
-        if self.swording > 0 and not ice_brand_active:
+        if self.swording > 0 and not ice_brand_active and not dark_mage_active:
             p_center_x = self.x + 20 * self.facing + 20
             p_center_y = self.y + 20
             swing_progress = (12 - self.swording) / 12.0
@@ -2869,6 +3139,7 @@ class Enemy:
         self.attack_cooldown = random.randint(60, 180)
         self.frozen_timer = 0
         self.burn_timer = 0
+        self.darkness_timer = 0
         self.spawn_timer = 0
         self.debris_particles = []
 
@@ -2904,6 +3175,11 @@ class Enemy:
 
         if self.burn_timer > 0:
             self.burn_timer -= 1
+            
+        if getattr(self, 'darkness_timer', 0) > 0:
+            self.darkness_timer -= 1
+            if self.darkness_timer % 30 == 0:
+                self.take_damage(1, status_effect=True, element='dark')
             if self.burn_timer % 60 == 0: # Damage every second
 
                 self.take_damage(1, status_effect=True)
@@ -3832,7 +4108,7 @@ async def main():
                         rect = pygame.Rect(cx, cy, card_w_s_base, card_h_s_base)
                     
                         if rect.collidepoint(mx, my):
-                            if i == 0: player.set_character(Swordsman)
+                            if i == 0: player.set_character(DarkMage)
                             elif i == 1: player.set_character(Archer)
                             elif i == 2: player.set_character(MagicSwordsman)
                             elif i == 3: player.set_character(Warrior)
@@ -4272,7 +4548,7 @@ async def main():
             screen.blit(overlay, (0, 0))
         
             cards = [
-                {"name": "Swordsman", "color": (150, 20, 20), "skills": "J:DashStrike K:Rising\nL:Fire N:BraveCharge\nM:Gravity"},
+                {"name": "DarkMage", "color": (80, 0, 120), "skills": "J:BlackHole K:ElMinya\nL:DarkPulse N:ShadowStep\nM:AbyssRay"},
                 {"name": "Archer", "color": (20, 100, 20), "skills": "J:PierceArrow K:Mirror\nL:WarpArrow N:ArrowRain\nM:PinArrow"},
                 {"name": "MagicSwordsman", "color": (80, 20, 150), "skills": "J:MagicSword K:Thunder\nL:IceEnchant N:FireEnchant\nM:BraveCharge"},
                 {"name": "Warrior", "color": (150, 100, 20), "skills": "J:HammerThrow K:SuperArmor\nL:Energy N:Earthquake\nM:WarCry"},
