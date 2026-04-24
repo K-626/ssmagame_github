@@ -954,6 +954,8 @@ class Character:
             'RoarSkill': 'Roar', 'AmpuleSkill': 'Ampule', 'RampageSkill': 'Rampage',
             'BlackHoleSkill': 'Black Hole', 'ElMinyaSkill': 'El Minya', 'DarkPulseSkill': 'Dark Pulse',
             'ShadowStepSkill': 'Shadow Step', 'AbyssRaySkill': 'Abyss Ray',
+            'AutoCrossbowSkill': 'Crossbow', 'BearTrapSkill': 'Bear Trap', 'HawkStrikeSkill': 'Hawk Strike',
+            'SurvivalSkill': 'Survival',
         }
 
         skill_keys = ['J', 'K', 'L', 'N', 'M']
@@ -1025,7 +1027,9 @@ class Character:
             # IceMage
             AlHumaSkill, IceBrandArtsSkill, BlizzardLanceSkill, IceShieldSkill, CocytusSkill,
             # DarkMage
-            BlackHoleSkill, ElMinyaSkill, DarkPulseSkill, ShadowStepSkill, AbyssRaySkill
+            BlackHoleSkill, ElMinyaSkill, DarkPulseSkill, ShadowStepSkill, AbyssRaySkill,
+            # Hunter
+            AutoCrossbowSkill, BearTrapSkill, HawkStrikeSkill, SurvivalSkill
         ]
                               
         # List of candidate skills excluding already owned ones
@@ -2788,13 +2792,218 @@ class DarkMage(Character):
     def draw_effects(self, screen):
         super().draw_effects(screen)
         for c in self.crystals:
+            # Glow effect
+            glow_surf = pygame.Surface((30, 30), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surf, (150, 0, 200, 100), (15, 15), 15)
+            screen.blit(glow_surf, (int(c[0] - 15), int(c[1] - 15)))
+            # Core
             points = [
-                (c[0] + 10, c[1]),
-                (c[0], c[1] + 5),
-                (c[0] - 10, c[1]),
-                (c[0], c[1] - 5)
+                (c[0] + 12, c[1]),
+                (c[0], c[1] + 6),
+                (c[0] - 12, c[1]),
+                (c[0], c[1] - 6)
             ]
-            pygame.draw.polygon(screen, (200, 100, 255), points)
+            pygame.draw.polygon(screen, (220, 150, 255), points)
+            pygame.draw.polygon(screen, (255, 255, 255), points, 2)
+
+class AutoCrossbowSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 240, (150, 200, 100), (100, 150, 50))
+        self.arrows = []
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            for i in range(3):
+                vy = -2 + i * 2
+                vx = 20 * player.facing
+                self.arrows.append([player.x + 20, player.y + 20, vx, vy, [], 60])
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        new_arrows = []
+        for a in self.arrows:
+            a[5] -= 1
+            if enemies:
+                target = None
+                min_dist = float('inf')
+                for e in enemies:
+                    if e.hp > 0:
+                        dist = math.hypot(e.x+e.width/2 - a[0], e.y+e.height/2 - a[1])
+                        if dist < min_dist: min_dist = dist; target = e
+                if target:
+                    dx = target.x + target.width/2 - a[0]
+                    dy = target.y + target.height/2 - a[1]
+                    d = max(1, math.hypot(dx, dy))
+                    a[2] = (a[2] * 5 + (dx/d)*20) / 6
+                    a[3] = (a[3] * 5 + (dy/d)*20) / 6
+            a[0] += a[2]
+            a[1] += a[3]
+            hit = False
+            if enemies:
+                for e in enemies:
+                    if e.hp > 0 and e.x <= a[0] <= e.x + e.width and e.y <= a[1] <= e.y + e.height:
+                        if e not in a[4]:
+                            e.take_damage(3 + self.damage_bonus, 1 if a[2] > 0 else -1, ignore_iframes=True)
+                            a[4].append(e)
+                            hit = True
+                            break
+            if not hit and a[5] > 0 and -100 < a[0] < width + 100:
+                new_arrows.append(a)
+        self.arrows = new_arrows
+    def draw_effect(self, screen):
+        for a in self.arrows:
+            pygame.draw.circle(screen, (200, 255, 150), (int(a[0]), int(a[1])), 4)
+            pygame.draw.line(screen, (150, 200, 100), (int(a[0]), int(a[1])), (int(a[0] - a[2]), int(a[1] - a[3])), 2)
+
+class BearTrapSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 480, (200, 100, 50), (150, 50, 0))
+        self.traps = []
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            tx = player.x + 80 * player.facing
+            self.traps.append([tx, ground, 600, False])
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        new_traps = []
+        for t in self.traps:
+            t[2] -= 1
+            if not t[3] and enemies:
+                trap_rect = pygame.Rect(t[0] - 20, t[1] - 10, 40, 20)
+                for e in enemies:
+                    if e.hp > 0 and trap_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+                        e.take_damage(5 + self.damage_bonus, 0)
+                        e.frozen_timer = max(getattr(e, 'frozen_timer', 0), 120)
+                        t[3] = True
+                        break
+            if t[2] > 0 and not t[3]:
+                new_traps.append(t)
+        self.traps = new_traps
+    def draw_effect(self, screen):
+        for t in self.traps:
+            if not t[3]:
+                pygame.draw.polygon(screen, (150, 150, 150), [(t[0]-15, t[1]), (t[0]-5, t[1]-10), (t[0]+5, t[1]-10), (t[0]+15, t[1])])
+                pygame.draw.circle(screen, (200, 50, 50), (int(t[0]), int(t[1]-5)), 4)
+
+class HawkStrikeSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 600, (100, 200, 255), (50, 100, 200))
+        self.hawks = []
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            hx = player.x - 200 * player.facing
+            hy = player.y - 300
+            vx = 25 * player.facing
+            vy = 15
+            self.hawks.append([hx, hy, vx, vy, []])
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        new_hawks = []
+        for h in self.hawks:
+            h[0] += h[2]
+            h[1] += h[3]
+            if enemies:
+                for e in enemies:
+                    if e.hp > 0 and e not in h[4] and e.x <= h[0] <= e.x + e.width and e.y <= h[1] <= e.y + e.height:
+                        e.take_damage(8 + self.damage_bonus, 1 if h[2] > 0 else -1, knockback_x=10, knockback_y=-5, ignore_iframes=True)
+                        h[4].append(e)
+            if h[1] < ground + 50:
+                new_hawks.append(h)
+        self.hawks = new_hawks
+    def draw_effect(self, screen):
+        for h in self.hawks:
+            pygame.draw.line(screen, (200, 255, 255), (int(h[0]), int(h[1])), (int(h[0] - 20), int(h[1] - 20)), 4)
+            pygame.draw.line(screen, (200, 255, 255), (int(h[0]), int(h[1])), (int(h[0] - 20), int(h[1] + 10)), 4)
+
+class SurvivalSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 900, (50, 255, 100), (20, 150, 50))
+        self.active_timer = 0
+        self.player_ref = None
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            self.active_timer = 300
+            self.player_ref = player
+            player.hp = min(player.max_hp, player.hp + 5)
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        if self.active_timer > 0:
+            self.active_timer -= 1
+            if self.player_ref:
+                self.player_ref.move_speed = max(self.player_ref.move_speed, 1.8)
+                self.player_ref.jump_power = min(self.player_ref.jump_power, -18)
+    def draw_effect(self, screen):
+        if self.active_timer > 0 and self.player_ref:
+            pygame.draw.circle(screen, (100, 255, 100), (int(self.player_ref.x + 20), int(self.player_ref.y + 20)), 30, 2)
+
+class Hunter(Character):
+    """Hunter: Uses throwing axes, traps, and nature skills."""
+    def __init__(self, player):
+        super().__init__(player)
+        self.skill_crossbow = AutoCrossbowSkill(15, 15)
+        self.skill_arrowrain = ArrowRainSkill(75, 15)
+        self.skill_trap = BearTrapSkill(135, 15)
+        self.skill_hawk = HawkStrikeSkill(195, 15)
+        self.skill_survival = SurvivalSkill(255, 15)
+        self.skills = [self.skill_crossbow, self.skill_arrowrain, self.skill_trap, self.skill_hawk, self.skill_survival]
+        self.axes = []
+        
+    def get_max_hp(self): return 9
+    def get_speed(self): return 1.3
+    def get_jump_power(self): return -15
+
+    def attack(self, enemies):
+        self.player.swording = 12
+        vx = 18 * self.player.facing
+        vy = -8
+        self.axes.append([self.player.x + 20, self.player.y + 10, vx, vy, 0, []])
+
+    def handle_event(self, event, enemies):
+        super().handle_event(event, enemies)
+        if event.type == pygame.KEYDOWN:
+            if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
+                self.player.vy = self.player.jump_power
+                self.player.jumpcount -= 1
+            if not self.is_reincarnator_mode:
+                if event.key == key_config['skill_1']: self.skill_crossbow.activate(self.player, enemies)
+                if event.key == key_config['skill_2']: self.skill_arrowrain.activate(self.player, enemies)
+                if event.key == key_config['skill_3']: self.skill_trap.activate(self.player, enemies)
+                if event.key == key_config['skill_4']: self.skill_hawk.activate(self.player, enemies)
+                if event.key == key_config['skill_5']: self.skill_survival.activate(self.player, enemies)
+
+    def update(self, keys, enemies, cooldown_speed):
+        super().update(keys, enemies, cooldown_speed)
+        new_axes = []
+        for a in self.axes:
+            a[0] += a[2]
+            a[1] += a[3]
+            a[3] += 0.8
+            a[4] += 20 * (1 if a[2] > 0 else -1)
+            if enemies:
+                axe_rect = pygame.Rect(a[0] - 15, a[1] - 15, 30, 30)
+                for e in enemies:
+                    if e.hp > 0 and e not in a[5] and axe_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+                        e.take_damage(2 + self.player.bonus_damage, 1 if a[2] > 0 else -1, ignore_iframes=True)
+                        a[5].append(e)
+            if a[1] < ground + 20 and -100 < a[0] < width + 100:
+                new_axes.append(a)
+        self.axes = new_axes
+
+    def draw_effects(self, screen):
+        super().draw_effects(screen)
+        for a in self.axes:
+            surf = pygame.Surface((30, 30), pygame.SRCALPHA)
+            pygame.draw.rect(surf, (139, 69, 19), (12, 5, 6, 20))
+            pygame.draw.polygon(surf, (200, 200, 200), [(18, 5), (28, 0), (28, 15), (18, 10)])
+            rot_surf = pygame.transform.rotate(surf, a[4])
+            rect = rot_surf.get_rect(center=(int(a[0]), int(a[1])))
+            screen.blit(rot_surf, rect)
 
 # --- Player Class Definition ---
 class Player:
@@ -3002,8 +3211,9 @@ class Player:
         # Hide standard sword if Ice Brand is active
         ice_brand_active = getattr(self, '_ice_brand_timer', 0) > 0 and self.character and type(self.character).__name__ == "IceMage"
         dark_mage_active = self.character and type(self.character).__name__ == "DarkMage"
+        hunter_active = self.character and type(self.character).__name__ == "Hunter"
 
-        if self.swording > 0 and not ice_brand_active and not dark_mage_active:
+        if self.swording > 0 and not ice_brand_active and not dark_mage_active and not hunter_active:
             is_critical = abs(self.vx) > 10
             base_dmg = (2 if is_critical else 1) + self.bonus_damage
             
@@ -3057,8 +3267,9 @@ class Player:
         # Hide standard sword if Ice Brand is active
         ice_brand_active = getattr(self, '_ice_brand_timer', 0) > 0 and self.character and type(self.character).__name__ == "IceMage"
         dark_mage_active = self.character and type(self.character).__name__ == "DarkMage"
+        hunter_active = self.character and type(self.character).__name__ == "Hunter"
 
-        if self.swording > 0 and not ice_brand_active and not dark_mage_active:
+        if self.swording > 0 and not ice_brand_active and not dark_mage_active and not hunter_active:
             p_center_x = self.x + 20 * self.facing + 20
             p_center_y = self.y + 20
             swing_progress = (12 - self.swording) / 12.0
@@ -4109,7 +4320,7 @@ async def main():
                     
                         if rect.collidepoint(mx, my):
                             if i == 0: player.set_character(DarkMage)
-                            elif i == 1: player.set_character(Archer)
+                            elif i == 1: player.set_character(Hunter)
                             elif i == 2: player.set_character(MagicSwordsman)
                             elif i == 3: player.set_character(Warrior)
                             elif i == 4: player.set_character(Pyromancer)
@@ -4549,7 +4760,7 @@ async def main():
         
             cards = [
                 {"name": "DarkMage", "color": (80, 0, 120), "skills": "J:BlackHole K:ElMinya\nL:DarkPulse N:ShadowStep\nM:AbyssRay"},
-                {"name": "Archer", "color": (20, 100, 20), "skills": "J:PierceArrow K:Mirror\nL:WarpArrow N:ArrowRain\nM:PinArrow"},
+                {"name": "Hunter", "color": (20, 100, 20), "skills": "J:Crossbow K:ArrowRain\nL:BearTrap N:HawkStrike\nM:Survival"},
                 {"name": "MagicSwordsman", "color": (80, 20, 150), "skills": "J:MagicSword K:Thunder\nL:IceEnchant N:FireEnchant\nM:BraveCharge"},
                 {"name": "Warrior", "color": (150, 100, 20), "skills": "J:HammerThrow K:SuperArmor\nL:Energy N:Earthquake\nM:WarCry"},
                 {"name": "Pyromancer", "color": (200, 50, 0), "skills": "J:Lava K:SpreadFire\nL:Eruption N:FlameDash\nM:Meteor"},
