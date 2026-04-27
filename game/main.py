@@ -1055,7 +1055,9 @@ class Character:
             {"type": "soul_sword", "name": "Soul Sword", "desc": "Heal 20% of damage dealt with sword hits (Stackable %)", "color": (150, 255, 150)},
             {"type": "blood_sword", "name": "Blood Sword", "desc": "1.1x damage if hit again within 1s (Stackable duration)", "color": (255, 50, 50)},
             {"type": "poison_spear", "name": "Poison Spear", "desc": "Deal 10% current HP on spear hits (Stackable %)", "color": (100, 255, 100)},
-            {"type": "thunder_mace", "name": "Thunder Mace", "desc": "10% chance for lightning on hammer hits (Stackable %/#)", "color": (255, 255, 100)}
+            {"type": "thunder_mace", "name": "Thunder Mace", "desc": "10% chance for lightning on hammer hits (Stackable %/#)", "color": (255, 255, 100)},
+            {"type": "soulburst", "name": "Soulburst", "desc": "Explode when taking damage (Stackable damage)", "color": (255, 150, 50)},
+            {"type": "multi_cast", "name": "Multi-Cast", "desc": "Magic/Axe projectile count +1 (Stackable #)", "color": (150, 100, 255)}
         ]
         self.current_boss_rewards = random.sample(pool, 3)
 
@@ -1079,6 +1081,10 @@ class Character:
             self.player.poison_spear_level += 1
         elif reward["type"] == "thunder_mace":
             self.player.thunder_mace_level += 1
+        elif reward["type"] == "soulburst":
+            self.player.soulburst_level += 1
+        elif reward["type"] == "multi_cast":
+            self.player.multi_cast_level += 1
         return True
 
 
@@ -1415,10 +1421,12 @@ class Pyromancer(Character):
         return -14
 
     def attack(self, enemies):
-        # Basic attack: Fireball
+        # Basic attack: Fireball (unified mage projectile)
         vx = 20 * self.player.facing
-
-        self.fireballs.append([self.player.x + 20, self.player.y + 20, vx, 40, self.player.facing]) # Add player.facing
+        count = 1 + getattr(self.player, 'multi_cast_level', 0)
+        for i in range(count):
+            y_offset = (i - (count-1)/2) * 8
+            self.fireballs.append([self.player.x + 20, self.player.y + 20 + y_offset, vx, 40, self.player.facing])
 
     def handle_event(self, event, enemies):
         super().handle_event(event, enemies)
@@ -1438,17 +1446,15 @@ class Pyromancer(Character):
         super().update(keys, enemies, cooldown_speed)
         # Update fireballs
         for fb in self.fireballs[:]:
-
             fb[0] += fb[2]
             fb[3] -= 1
             hit = False
             if enemies:
                 for e in enemies:
                     if e.hp > 0 and e.x < fb[0] < e.x + e.width and e.y < fb[1] < e.y + e.height:
-                        if e.take_damage(1, fb[4], element='fire', ignore_iframes=True): # Use fireball's facing
+                        if e.take_damage(1, fb[4], element='fire', ignore_iframes=True):
                             hit = True
                             break
-
             if hit or fb[3] <= 0:
                 self.fireballs.remove(fb)
                 
@@ -1920,6 +1926,69 @@ class MagicSwordsman(Character):
 
 
 # [Translated/Cleaned Comment]
+class PredatorLeapSkill(Skill):
+    """Predator Leap: Targets nearest enemy and leaps toward them."""
+    def __init__(self, x, y):
+        super().__init__(x, y, 120, (180, 80, 50), (90, 40, 25))
+        self.leaping = 0
+        self.leap_vx = 0
+        self.leap_vy = 0
+        self.hit_enemies = []
+        self.player_ref = None
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            target = None
+            min_dist = float('inf')
+            if enemies:
+                for e in enemies:
+                    if e.hp > 0:
+                        dist = math.hypot(e.x + e.width/2 - player.x, e.y + e.height/2 - player.y)
+                        if dist < min_dist:
+                            min_dist = dist
+                            target = e
+            if target:
+                dx = target.x + target.width/2 - (player.x + 20)
+                dy = target.y + target.height/2 - (player.y + 20)
+                d = max(1, math.hypot(dx, dy))
+                speed = 18
+                self.leap_vx = (dx/d) * speed
+                self.leap_vy = (dy/d) * speed
+            else:
+                self.leap_vx = 15 * player.facing
+                self.leap_vy = -5
+            self.leaping = 12
+            self.hit_enemies = []
+            self.player_ref = player
+            player.invincible_timer = max(player.invincible_timer, 12)
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        if self.leaping > 0 and player:
+            self.leaping -= 1
+            player.x += self.leap_vx
+            player.y += self.leap_vy
+            player.invincible_timer = max(player.invincible_timer, 2)
+            if player.x < 0: player.x = 0
+            if player.x > width - player.width: player.x = width - player.width
+            if player.y > ground - player.height: player.y = ground - player.height
+            if enemies:
+                hit_rect = pygame.Rect(player.x - 10, player.y - 10, 60, 60)
+                for e in enemies:
+                    if e.hp > 0 and e not in self.hit_enemies:
+                        if hit_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+                            dmg = int(5 * getattr(player, 'damage_multiplier', 1))
+                            if e.take_damage(dmg, 1 if self.leap_vx > 0 else -1, knockback_x=8, knockback_y=-5):
+                                self.hit_enemies.append(e)
+                                if getattr(player, '_monster_rampage', 0) > 0:
+                                    player.hp = min(player.max_hp, player.hp + 1)
+    def draw_effect(self, screen):
+        if self.leaping > 0 and self.player_ref:
+            p = self.player_ref
+            surf = pygame.Surface((60, 60), pygame.SRCALPHA)
+            pygame.draw.ellipse(surf, (200, 80, 50, 100), (0, 0, 60, 60))
+            screen.blit(surf, (int(p.x - 10), int(p.y - 10)))
+
 class PounceSkill(Skill):
     """     :            HP  """
     def __init__(self, x, y):
@@ -1957,7 +2026,7 @@ class PounceSkill(Skill):
         pass
 
 class ScaleProjectileSkill(Skill):
-    """  :            """
+    """Scale Blade: Fires homing scale projectiles. Drain during rampage."""
     def __init__(self, x, y):
         super().__init__(x, y, 45, (150, 80, 80), (75, 40, 40))
         self.projectiles = []
@@ -1967,7 +2036,7 @@ class ScaleProjectileSkill(Skill):
             pierce = getattr(player, '_monster_rampage', 0) > 0
             self.projectiles.append({
                 'x': player.x + 20, 'y': player.y + 15,
-                'vx': vx, 'timer': 60, 'facing': player.facing,
+                'vx': vx, 'vy': 0, 'timer': 60, 'facing': player.facing,
                 'pierce': pierce, 'hit': []
             })
             return True
@@ -1975,8 +2044,24 @@ class ScaleProjectileSkill(Skill):
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
         dmg_mult = getattr(player, 'damage_multiplier', 1) if player else 1
+        rampage = getattr(player, '_monster_rampage', 0) > 0 if player else False
         for p in self.projectiles[:]:
+            # Homing toward nearest enemy
+            if enemies:
+                target = None
+                min_dist = float('inf')
+                for e in enemies:
+                    if e.hp > 0 and e not in p['hit']:
+                        dist = math.hypot(e.x+e.width/2 - p['x'], e.y+e.height/2 - p['y'])
+                        if dist < min_dist: min_dist = dist; target = e
+                if target:
+                    dx = target.x + target.width/2 - p['x']
+                    dy = target.y + target.height/2 - p['y']
+                    d = max(1, math.hypot(dx, dy))
+                    p['vx'] = (p['vx'] * 5 + (dx/d)*15) / 6
+                    p['vy'] = (p['vy'] * 5 + (dy/d)*15) / 6
             p['x'] += p['vx']
+            p['y'] += p['vy']
             p['timer'] -= 1
             if p['timer'] <= 0 or p['x'] < -50 or p['x'] > width + 50:
                 self.projectiles.remove(p)
@@ -1988,6 +2073,9 @@ class ScaleProjectileSkill(Skill):
                         if proj_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                             e.take_damage(int(2 * dmg_mult), p['facing'])
                             p['hit'].append(e)
+                            # Drain during rampage
+                            if rampage and player:
+                                player.hp = min(player.max_hp, player.hp + 1)
                             if not p['pierce']:
                                 if p in self.projectiles: self.projectiles.remove(p)
                                 break
@@ -2086,31 +2174,34 @@ class RampageSkill(Skill):
 
 class MonsterBeta(Character):
     """
-       :                                         
+    Monster: Pounce-based melee with ampule stacking and rampage.
     """
     def __init__(self, player):
         super().__init__(player)
-        # [Translated/Cleaned Comment]
-        self.skill_pounce = PounceSkill(15, 15)
+        self.skill_predator = PredatorLeapSkill(15, 15)
         self.skill_scale = ScaleProjectileSkill(75, 15)
         self.skill_roar = RoarSkill(135, 15)
         self.skill_ampule = AmpuleSkill(195, 15)
         self.skill_rampage = RampageSkill(255, 15)
-        # [Translated/Cleaned Comment]
-        self.skills = [self.skill_pounce, self.skill_scale, self.skill_roar, self.skill_ampule, self.skill_rampage]
-        self.scratch_timer = 0  # [Translated/Cleaned Comment]
-        self.hit_enemies = []   # [Translated/Cleaned Comment]
-        player._ampule_count = 0     # [Translated/Cleaned Comment]
-        player._monster_rampage = 0  # [Translated/Cleaned Comment]
+        self.skills = [self.skill_predator, self.skill_scale, self.skill_roar, self.skill_ampule, self.skill_rampage]
+        self.pounce_timer = 0
+        self.pounce_dir = 1
+        self.pounce_hit_enemies = []
+        self.scratch_timer = 0
+        self.hit_enemies = []
+        player._ampule_count = 0
+        player._monster_rampage = 0
 
     def get_max_hp(self): return 12
     def get_speed(self): return 1.5
     def get_jump_power(self): return -16
 
     def attack(self, enemies):
-        if self.scratch_timer == 0:
-            self.scratch_timer = 8
-            self.hit_enemies = []
+        # Pounce forward + scratch after
+        if self.pounce_timer == 0 and self.scratch_timer == 0:
+            self.pounce_timer = 10
+            self.pounce_dir = self.player.facing
+            self.pounce_hit_enemies = []
 
     def handle_event(self, event, enemies):
         super().handle_event(event, enemies)
@@ -2120,7 +2211,7 @@ class MonsterBeta(Character):
                 self.player.jumpcount -= 1
             if not self.is_reincarnator_mode:
                 if event.key == key_config['skill_1']:
-                    self.skill_pounce.activate(self.player, enemies)
+                    self.skill_predator.activate(self.player, enemies)
                 if event.key == key_config['skill_2']:
                     self.skill_scale.activate(self.player, enemies)
                 if event.key == key_config['skill_3']:
@@ -2146,6 +2237,27 @@ class MonsterBeta(Character):
             self.player.move_speed = 1.5
             self.player.jump_power = -16
         
+        # Pounce phase (basic attack)
+        if self.pounce_timer > 0:
+            self.pounce_timer -= 1
+            self.player.x += 10 * self.pounce_dir
+            self.player.invincible_timer = max(self.player.invincible_timer, 2)
+            if enemies:
+                hit_rect = pygame.Rect(self.player.x - 10, self.player.y - 10, 60, 60)
+                for e in enemies:
+                    if e.hp > 0 and e not in self.pounce_hit_enemies:
+                        if hit_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+                            dmg = int(2 * self.player.damage_multiplier)
+                            if e.take_damage(dmg, self.pounce_dir, knockback_x=6, knockback_y=-3):
+                                self.pounce_hit_enemies.append(e)
+                                if rampage > 0:
+                                    self.player.hp = min(self.player.max_hp, self.player.hp + 1)
+            if self.pounce_timer == 0:
+                # Start scratch after pounce
+                self.scratch_timer = 8
+                self.hit_enemies = []
+
+        # Scratch phase (after pounce)
         if self.scratch_timer > 0:
             self.scratch_timer -= 1
             if self.scratch_timer < 5:
@@ -2361,7 +2473,7 @@ class CocytusSkill(Skill):
             if enemies:
                 for e in enemies:
                     if e.hp > 0:
-                        e.frozen_timer = 10
+                        e.frozen_timer = 80
                         e.take_damage(5 + self.damage_bonus, 0, element='ice')
             return True
         return False
@@ -2402,7 +2514,10 @@ class IceMage(Character):
                 self.player.hit_timer = max(self.player.hit_timer, 20)
         else:
             vx = 20 * self.player.facing
-            self.ice_blocks.append([self.player.x + 20, self.player.y + 20, vx, 40, self.player.facing])
+            count = 1 + getattr(self.player, 'multi_cast_level', 0)
+            for i in range(count):
+                y_offset = (i - (count-1)/2) * 8
+                self.ice_blocks.append([self.player.x + 20, self.player.y + 20 + y_offset, vx, 40, self.player.facing])
 
     def handle_event(self, event, enemies):
         super().handle_event(event, enemies)
@@ -2419,7 +2534,7 @@ class IceMage(Character):
 
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
-        new_blocks = []
+        # Update ice blocks
         for b in self.ice_blocks[:]:
             b[0] += b[2]
             b[3] -= 1
@@ -2626,25 +2741,32 @@ class ElMinyaSkill(Skill):
                 for i in range(5):
                     angle = math.radians(random.randint(0, 360))
                     speed = random.uniform(8, 12)
-                    new_bullets.append([b[0], b[1], math.cos(angle)*speed, math.sin(angle)*speed, 40, True])
+                    new_bullets.append([b[0], b[1], math.cos(angle)*speed, math.sin(angle)*speed, 80, True])
             if not hit and not split_trigger and -100 < b[0] < width + 100:
                 new_bullets.append(b)
         self.bullets = new_bullets
     def draw_effect(self, screen):
         for b in self.bullets:
-            radius = 4 if b[5] else 8
-            pygame.draw.circle(screen, (200, 0, 255), (int(b[0]), int(b[1])), radius)
+            if b[5]:
+                # Split bullet: larger + glow
+                glow_surf = pygame.Surface((20, 20), pygame.SRCALPHA)
+                pygame.draw.circle(glow_surf, (200, 0, 255, 80), (10, 10), 10)
+                screen.blit(glow_surf, (int(b[0] - 10), int(b[1] - 10)))
+                pygame.draw.circle(screen, (220, 80, 255), (int(b[0]), int(b[1])), 6)
+                pygame.draw.circle(screen, (255, 200, 255), (int(b[0]), int(b[1])), 3)
+            else:
+                pygame.draw.circle(screen, (200, 0, 255), (int(b[0]), int(b[1])), 8)
 
 class DarkPulseSkill(Skill):
     def __init__(self, x, y):
         super().__init__(x, y, 480, (50, 0, 100), (30, 0, 50))
         self.active_timer = 0
-        self.pulse_radius = 0
+        self.pulses = []  # [{cx, cy, radius, timer}]
         self.player_ref = None
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            self.active_timer = 20
-            self.pulse_radius = 0
+            self.active_timer = 120
+            self.pulses = []
             self.player_ref = player
             return True
         return False
@@ -2652,34 +2774,66 @@ class DarkPulseSkill(Skill):
         super().update(enemies, cooldown_speed)
         if self.active_timer > 0:
             self.active_timer -= 1
-            self.pulse_radius += 15
-            if self.active_timer == 10 and self.player_ref and enemies:
+            # Emit a new pulse every 30 frames
+            if self.active_timer % 30 == 0 and self.player_ref:
+                self.pulses.append({'cx': self.player_ref.x + 20, 'cy': self.player_ref.y + 20, 'radius': 0, 'timer': 20, 'hit': []})
+        # Update each pulse independently
+        new_pulses = []
+        for p in self.pulses:
+            p['timer'] -= 1
+            p['radius'] += 15
+            if p['timer'] == 10 and self.player_ref and enemies:
                 for e in enemies:
-                    if e.hp > 0:
-                        dx = (e.x + e.width/2) - (self.player_ref.x + 20)
-                        dy = (e.y + e.height/2) - (self.player_ref.y + 20)
+                    if e.hp > 0 and e not in p['hit']:
+                        dx = (e.x + e.width/2) - p['cx']
+                        dy = (e.y + e.height/2) - p['cy']
                         if math.hypot(dx, dy) < 300:
                             e.take_damage(8 + self.damage_bonus, 1 if dx > 0 else -1, knockback_x=15, knockback_y=-5, element='dark', ignore_iframes=True)
                             e.darkness_timer = 300
+                            p['hit'].append(e)
+            if p['timer'] > 0:
+                new_pulses.append(p)
+        self.pulses = new_pulses
     def draw_effect(self, screen):
-        if self.active_timer > 0 and self.player_ref:
-            pygame.draw.circle(screen, (100, 0, 200), (int(self.player_ref.x + 20), int(self.player_ref.y + 20)), self.pulse_radius, 5)
+        for p in self.pulses:
+            if p['radius'] >= 2:
+                alpha = min(200, p['timer'] * 10)
+                surf = pygame.Surface((p['radius']*2+2, p['radius']*2+2), pygame.SRCALPHA)
+                pygame.draw.circle(surf, (100, 0, 200, alpha), (p['radius']+1, p['radius']+1), p['radius'], 5)
+                screen.blit(surf, (int(p['cx'])-p['radius']-1, int(p['cy'])-p['radius']-1))
 
 class ShadowStepSkill(Skill):
     def __init__(self, x, y):
         super().__init__(x, y, 300, (80, 80, 100), (40, 40, 60))
         self.explosions = []
+        self.shadow_timer = 0
+        self.player_ref = None
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            self.explosions.append([player.x + 20, player.y + 20, 15])
-            player.x += 150 * player.facing
-            if player.x < 0: player.x = 0
-            if player.x > width - player.width: player.x = width - player.width
-            player.invincible_timer = 15
+            self.shadow_timer = 180  # 3 seconds of Shadow state
+            self.player_ref = player
+            player._shadow_state = True
+            player._shadow_skill_ref = self  # Reference for counter trigger
             return True
         return False
+    def trigger_counter(self, player):
+        """Called from Player.take_damage when shadow state is broken"""
+        player._shadow_state = False
+        self.shadow_timer = 0
+        # Dodge: teleport 150px away from current facing
+        dodge_dir = -player.facing  # Dodge backward
+        player.x += 150 * dodge_dir
+        if player.x < 0: player.x = 0
+        if player.x > width - player.width: player.x = width - player.width
+        # Explosion at dodge destination
+        self.explosions.append([player.x + 20, player.y + 20, 15])
+        player.invincible_timer = 30  # Invincible during counter sequence
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
+        if self.shadow_timer > 0:
+            self.shadow_timer -= 1
+            if self.shadow_timer <= 0 and player:
+                player._shadow_state = False
         new_exp = []
         for exp in self.explosions:
             exp[2] -= 1
@@ -2688,15 +2842,25 @@ class ShadowStepSkill(Skill):
                     if e.hp > 0:
                         dx = (e.x + e.width/2) - exp[0]
                         dy = (e.y + e.height/2) - exp[1]
-                        if math.hypot(dx, dy) < 80:
-                            e.take_damage(6 + self.damage_bonus, 1 if dx > 0 else -1, element='dark', ignore_iframes=True)
+                        if math.hypot(dx, dy) < 120:
+                            e.take_damage(10 + self.damage_bonus, 1 if dx > 0 else -1, element='dark', ignore_iframes=True)
             if exp[2] > 0:
                 new_exp.append(exp)
         self.explosions = new_exp
     def draw_effect(self, screen):
+        # Shadow state aura
+        if self.shadow_timer > 0 and self.player_ref:
+            p = self.player_ref
+            aura_surf = pygame.Surface((80, 80), pygame.SRCALPHA)
+            pulse = abs(math.sin(pygame.time.get_ticks() * 0.01)) * 40
+            pygame.draw.ellipse(aura_surf, (80, 0, 150, int(60 + pulse)), (0, 0, 80, 80))
+            screen.blit(aura_surf, (int(p.x - 20), int(p.y - 20)))
         for exp in self.explosions:
-            radius = (15 - exp[2]) * 5
-            pygame.draw.circle(screen, (50, 0, 100), (int(exp[0]), int(exp[1])), radius, 3)
+            radius = (15 - exp[2]) * 6
+            surf = pygame.Surface((radius*2+2, radius*2+2), pygame.SRCALPHA)
+            alpha = min(220, exp[2] * 15)
+            pygame.draw.circle(surf, (100, 0, 200, alpha), (radius+1, radius+1), radius)
+            screen.blit(surf, (int(exp[0])-radius-1, int(exp[1])-radius-1))
 
 class AbyssRaySkill(Skill):
     def __init__(self, x, y):
@@ -2756,9 +2920,11 @@ class DarkMage(Character):
     def get_jump_power(self): return -14
 
     def attack(self, enemies):
-        self.player.swording = 15
-        vx = 22 * self.player.facing
-        self.crystals.append([self.player.x + 20, self.player.y + 15, vx])
+        vx = 20 * self.player.facing
+        count = 1 + getattr(self.player, 'multi_cast_level', 0)
+        for i in range(count):
+            y_offset = (i - (count-1)/2) * 8
+            self.crystals.append([self.player.x + 20, self.player.y + 15 + y_offset, vx, 40, self.player.facing])
 
     def handle_event(self, event, enemies):
         super().handle_event(event, enemies)
@@ -2775,19 +2941,19 @@ class DarkMage(Character):
 
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
-        new_crystals = []
-        for c in self.crystals:
+        # Update crystals
+        for c in self.crystals[:]:
             c[0] += c[2]
+            c[3] -= 1
             hit = False
             if enemies:
                 for e in enemies:
                     if e.hp > 0 and e.x < c[0] < e.x + e.width and e.y < c[1] < e.y + e.height:
-                        e.take_damage(2 + self.player.bonus_damage, 1 if c[2] > 0 else -1, element='dark', ignore_iframes=True)
-                        hit = True
-                        break
-            if not hit and -100 < c[0] < width + 100:
-                new_crystals.append(c)
-        self.crystals = new_crystals
+                        if e.take_damage(1, c[4], element='dark', ignore_iframes=True):
+                            hit = True
+                            break
+            if hit or c[3] <= 0:
+                self.crystals.remove(c)
 
     def draw_effects(self, screen):
         super().draw_effects(screen)
@@ -2859,33 +3025,58 @@ class BearTrapSkill(Skill):
     def __init__(self, x, y):
         super().__init__(x, y, 480, (200, 100, 50), (150, 50, 0))
         self.traps = []
+        self.explosions = []
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
+            # Max 10 traps - oldest explodes when over limit
+            if len(self.traps) >= 10:
+                old = self.traps.pop(0)
+                self.explosions.append([old[0], old[1], 15])
             tx = player.x + 80 * player.facing
-            self.traps.append([tx, ground, 600, False])
+            self.traps.append([tx, ground, False])
             return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
         new_traps = []
         for t in self.traps:
-            t[2] -= 1
-            if not t[3] and enemies:
+            if not t[2] and enemies:
                 trap_rect = pygame.Rect(t[0] - 20, t[1] - 10, 40, 20)
                 for e in enemies:
                     if e.hp > 0 and trap_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                         e.take_damage(5 + self.damage_bonus, 0)
                         e.frozen_timer = max(getattr(e, 'frozen_timer', 0), 120)
-                        t[3] = True
+                        t[2] = True
                         break
-            if t[2] > 0 and not t[3]:
+            if not t[2]:
                 new_traps.append(t)
         self.traps = new_traps
+        # Explosion updates
+        new_exp = []
+        for exp in self.explosions:
+            exp[2] -= 1
+            if exp[2] == 10 and enemies:
+                for e in enemies:
+                    if e.hp > 0:
+                        dx = (e.x + e.width/2) - exp[0]
+                        dy = (e.y + e.height/2) - exp[1]
+                        if math.hypot(dx, dy) < 100:
+                            e.take_damage(5 + self.damage_bonus, 1 if dx > 0 else -1)
+            if exp[2] > 0:
+                new_exp.append(exp)
+        self.explosions = new_exp
     def draw_effect(self, screen):
         for t in self.traps:
-            if not t[3]:
+            if not t[2]:
                 pygame.draw.polygon(screen, (150, 150, 150), [(t[0]-15, t[1]), (t[0]-5, t[1]-10), (t[0]+5, t[1]-10), (t[0]+15, t[1])])
                 pygame.draw.circle(screen, (200, 50, 50), (int(t[0]), int(t[1]-5)), 4)
+        for exp in self.explosions:
+            radius = (15 - exp[2]) * 7
+            if radius >= 2:
+                surf = pygame.Surface((radius*2+2, radius*2+2), pygame.SRCALPHA)
+                alpha = min(255, exp[2] * 17)
+                pygame.draw.circle(surf, (255, 100, 0, alpha), (radius+1, radius+1), radius)
+                screen.blit(surf, (int(exp[0])-radius-1, int(exp[1])-radius-1))
 
 class HawkStrikeSkill(Skill):
     def __init__(self, x, y):
@@ -2893,31 +3084,46 @@ class HawkStrikeSkill(Skill):
         self.hawks = []
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            hx = player.x - 200 * player.facing
-            hy = player.y - 300
-            vx = 25 * player.facing
-            vy = 15
-            self.hawks.append([hx, hy, vx, vy, []])
+            hx = player.x + 40 * player.facing
+            hy = player.y - 200
+            self.hawks.append({'x': hx, 'y': hy, 'vx': 0, 'vy': 20, 'hit': [], 'phase': 1, 'facing': player.facing})
             return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
         new_hawks = []
         for h in self.hawks:
-            h[0] += h[2]
-            h[1] += h[3]
+            if h['phase'] == 1:
+                h['y'] += h['vy']
+                if h['y'] >= ground - 30:
+                    h['y'] = ground - 30
+                    h['phase'] = 2
+                    h['vx'] = 25 * h['facing']
+                    h['vy'] = 0
+            elif h['phase'] == 2:
+                h['x'] += h['vx']
+                h['y'] = ground - 30
             if enemies:
+                hawk_rect = pygame.Rect(h['x'] - 15, h['y'] - 10, 30, 20)
                 for e in enemies:
-                    if e.hp > 0 and e not in h[4] and e.x <= h[0] <= e.x + e.width and e.y <= h[1] <= e.y + e.height:
-                        e.take_damage(8 + self.damage_bonus, 1 if h[2] > 0 else -1, knockback_x=10, knockback_y=-5, ignore_iframes=True)
-                        h[4].append(e)
-            if h[1] < ground + 50:
+                    if e.hp > 0 and e not in h['hit'] and hawk_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+                        e.take_damage(8 + self.damage_bonus, h['facing'], knockback_x=10, knockback_y=-5, ignore_iframes=True)
+                        h['hit'].append(e)
+            if -50 < h['x'] < width + 50:
                 new_hawks.append(h)
         self.hawks = new_hawks
     def draw_effect(self, screen):
         for h in self.hawks:
-            pygame.draw.line(screen, (200, 255, 255), (int(h[0]), int(h[1])), (int(h[0] - 20), int(h[1] - 20)), 4)
-            pygame.draw.line(screen, (200, 255, 255), (int(h[0]), int(h[1])), (int(h[0] - 20), int(h[1] + 10)), 4)
+            hx, hy = int(h['x']), int(h['y'])
+            d = h['facing']
+            pygame.draw.ellipse(screen, (139, 90, 43), (hx - 12, hy - 5, 24, 10))
+            pygame.draw.circle(screen, (180, 130, 60), (hx + 8 * d, hy - 2), 5)
+            if h['phase'] == 1:
+                pygame.draw.line(screen, (200, 255, 255), (hx, hy), (hx - 18, hy - 15), 4)
+                pygame.draw.line(screen, (200, 255, 255), (hx, hy), (hx + 18, hy - 15), 4)
+            else:
+                pygame.draw.line(screen, (200, 255, 255), (hx, hy), (hx - 22 * d, hy - 8), 4)
+                pygame.draw.line(screen, (200, 255, 255), (hx, hy), (hx - 22 * d, hy + 8), 4)
 
 class SurvivalSkill(Skill):
     def __init__(self, x, y):
@@ -3046,6 +3252,9 @@ class Player:
         self.blood_sword_hits = 0
         self.poison_spear_level = 0
         self.thunder_mace_level = 0
+        self.soulburst_level = 0
+        self.multi_cast_level = 0
+        self._soulburst_explosions = []
 
         self.skill_m = MirrorSkill(15, 15)
         self.skill_g = GravitySkill(75, 15)
@@ -3100,6 +3309,9 @@ class Player:
         self.blood_sword_hits = 0
         self.poison_spear_level = 0
         self.thunder_mace_level = 0
+        self.soulburst_level = 0
+        self.multi_cast_level = 0
+        self._soulburst_explosions = []
         self.skills = [self.skill_m, self.skill_g, self.skill_i, self.skill_d, self.skill_l, self.skill_f, self.skill_t]
 
     def update(self, keys, enemies):
@@ -3250,6 +3462,14 @@ class Player:
             game_state = STATE_GAMEOVER
 
     def draw(self, screen):
+        # Soulburst explosions (drawn behind player)
+        for exp in getattr(self, '_soulburst_explosions', []):
+            radius = (15 - exp[2]) * 10
+            surf = pygame.Surface((radius*2+2, radius*2+2), pygame.SRCALPHA)
+            alpha = min(200, exp[2] * 15)
+            pygame.draw.circle(surf, (255, 150, 50, alpha), (radius+1, radius+1), radius)
+            screen.blit(surf, (int(exp[0])-radius-1, int(exp[1])-radius-1))
+
         color = (30, 100, 30)
         if self.hit_timer > 0 and (self.hit_timer // 4) % 2 == 0:
             color = (255, 255, 255)
@@ -3292,9 +3512,30 @@ class Player:
             if self.blood_sword_timer <= 0:
                 self.blood_sword_hits = 0
 
+        # Soulburst explosions update
+        new_sb_exp = []
+        for exp in getattr(self, '_soulburst_explosions', []):
+            exp[2] -= 1
+            if exp[2] == 10:  # Mid-explosion damage
+                sb_dmg = 8 * self.soulburst_level * getattr(self, 'damage_multiplier', 1)
+                for e in enemies:
+                    if e.hp > 0:
+                        dx = (e.x + e.width/2) - exp[0]
+                        dy = (e.y + e.height/2) - exp[1]
+                        if math.hypot(dx, dy) < 150:
+                            e.take_damage(int(sb_dmg), 1 if dx > 0 else -1)
+            if exp[2] > 0:
+                new_sb_exp.append(exp)
+        self._soulburst_explosions = new_sb_exp
+
         if self.character: self.character.update_timers()
 
     def take_damage(self, amount, source_facing=1):
+        # Shadow state reactive counter
+        if getattr(self, '_shadow_state', False) and getattr(self, '_shadow_skill_ref', None):
+            self._shadow_skill_ref.trigger_counter(self)
+            return False
+
         if self.invincible_timer > 0: return False
         if self.hit_timer == 0:
             amount = max(0, amount - self.defense) # Reduce by defense (0 damage allowed)
@@ -3304,6 +3545,13 @@ class Player:
             self.hp -= amount
             self.hit_timer = 40
             self.vx = source_facing * 10 # Knockback
+            
+            # Soulburst
+            if getattr(self, 'soulburst_level', 0) > 0:
+                if not hasattr(self, '_soulburst_explosions'):
+                    self._soulburst_explosions = []
+                self._soulburst_explosions.append([self.x + 20, self.y + 20, 15])
+                
             return True
         return False
 
