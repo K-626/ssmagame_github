@@ -133,6 +133,7 @@ class Skill:
         self.color_ready = color_ready      # Icon color when ready
         self.color_charge = color_charge    # Icon color when charging
         self.damage_bonus = 0               # Additional damage from evolution, etc.
+        self.damage_multiplier = 1.0        # Multiplier from limit break
 
 
     def update(self, enemies=None, cooldown_speed=1, player=None):
@@ -271,7 +272,7 @@ class LavaSkill(Skill):
                 for e in enemies:
                     if e.hp > 0 and self.place < e.x + e.width and e.x < self.place + self.width and e.y + e.height >= ground - 5:
                         e.burn_timer = 180
-                        e.take_damage(1 + self.damage_bonus, status_effect=True, element='fire')
+                        e.take_damage(int((1 + self.damage_bonus) * self.damage_multiplier), status_effect=True, element='fire')
 
     def draw_effect(self, screen):
         if self.range > 0:
@@ -309,7 +310,7 @@ class FireSkill(Skill):
                     if e.hp > 0 and e.x <= bx <= e.x + e.width and e.y <= by <= e.y + e.height:
                         # Pierce: Deal damage if enemy hasn't been hit by this bullet yet
                         if e not in b[4]:
-                            if e.take_damage(1 + self.damage_bonus, 1 if b[2] > 0 else -1, element='fire', ignore_iframes=True):
+                            if e.take_damage(int((1 + self.damage_bonus) * self.damage_multiplier), 1 if b[2] > 0 else -1, element='fire', ignore_iframes=True):
                                 b[4].append(e)
 
             
@@ -341,7 +342,7 @@ class ThunderSkill(Skill):
                 # Select a random enemy
                 target_enemy = random.choice(alive_enemies)
                 tx = target_enemy.x + target_enemy.width / 2
-                target_enemy.take_damage(2 + self.damage_bonus)
+                target_enemy.take_damage(int((2 + self.damage_bonus) * self.damage_multiplier))
             else:
                 # If no enemies, pick a random position
                 tx = random.randint(50, width - 50)
@@ -361,7 +362,7 @@ class ThunderSkill(Skill):
                     if abs((e.x + e.width/2) - tx) < 40:
                         # Lightning comes from above, so source_facing is arbitrary
                         sf = 1 if e.x < tx else -1
-                        e.take_damage(3 + self.damage_bonus, sf)
+                        e.take_damage(int((3 + self.damage_bonus) * self.damage_multiplier), sf)
             return True
 
         return False
@@ -450,7 +451,7 @@ class MagicSwordSkill(Skill):
                     if e.hp > 0 and wave_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                         if e not in w[4]:
 
-                            if e.take_damage(2 + self.damage_bonus, 1 if w[2] > 0 else -1, ignore_iframes=True):
+                            if e.take_damage(int((2 + self.damage_bonus) * self.damage_multiplier), 1 if w[2] > 0 else -1, ignore_iframes=True):
                                 w[4].append(e)
             if w[3] > 0: new_waves.append(w)
         self.waves = new_waves
@@ -536,7 +537,7 @@ class PiercingArrowSkill(Skill):
             if enemies:
                 for e in enemies:
                     if e.hp > 0 and e not in a[4] and e.x < a[0] < e.x + e.width and e.y < a[1] < e.y + e.height:
-                        if e.take_damage(2 + self.damage_bonus, 1 if a[2] > 0 else -1, ignore_iframes=True):
+                        if e.take_damage(int((2 + self.damage_bonus) * self.damage_multiplier), 1 if a[2] > 0 else -1, ignore_iframes=True):
                             a[4].append(e) # Piercing
 
             if -100 < a[0] < width + 100 and -100 < a[1] < height + 100 and a[1] < ground + 20:
@@ -781,7 +782,7 @@ class EarthquakeSkill(Skill):
                 dive_rect = pygame.Rect(self.player_ref.x - 20, self.player_ref.y, 80, 100)
                 for e in enemies:
                     if e.hp > 0 and e not in self.hit_enemies and dive_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                        if e.take_damage(8 + self.damage_bonus, self.source_facing, element='heavy'):
+                        if e.take_damage(int((8 + self.damage_bonus) * self.damage_multiplier), self.source_facing, element='heavy'):
                             self.hit_enemies.append(e)
 
             # Trigger on ground impact
@@ -793,7 +794,7 @@ class EarthquakeSkill(Skill):
                     blast = pygame.Rect(self.player_ref.x - 120, self.player_ref.y - 60, 280, 110)
                     for e in enemies:
                         if e.hp > 0 and blast.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            e.take_damage(15 + self.damage_bonus, self.source_facing, knockback_y=-12, element='heavy')
+                            e.take_damage(int((15 + self.damage_bonus) * self.damage_multiplier), self.source_facing, knockback_y=-12, element='heavy')
     def draw_effect(self, screen):
         if (self.phase == 1 or self.phase == 2) and self.player_ref:
             pygame.draw.circle(screen, (200, 150, 50), (int(self.player_ref.x+20), int(self.player_ref.y+20)), 25)
@@ -1048,27 +1049,47 @@ class Character:
 
     def generate_boss_rewards(self):
         """Generates 3 special rewards after boss defeat"""
+        # Determine available rewards based on character and skills
+        is_sword = any(type(self).__name__ == cls for cls in ["MagicSwordsman", "Warrior"]) or \
+                   any(type(s).__name__ == "IceBrandArtsSkill" for s in self.skills)
+        is_spear = type(self).__name__ == "Lancer"
+        is_hammer = type(self).__name__ == "Warrior"
+        is_projectile = any(type(self).__name__ == cls for cls in ["Pyromancer", "IceMage", "DarkMage", "Hunter", "MonsterBeta"])
+
         pool = [
             {"type": "slot_plus", "name": "Choice Slot+", "desc": "Normal upgrade choices +1", "color": (100, 200, 255)},
-            {"type": "evolution", "name": "Evolution", "desc": "One skill Damage +3", "color": (255, 100, 100)},
+            {"type": "limit_break", "name": "Limit Break", "desc": "One skill Damage x1.5", "color": (255, 100, 100)},
             {"type": "hero_blessing", "name": "Hero's Blessing", "desc": "Max HP+10, Heal, Def+1", "color": (255, 215, 0)},
-            {"type": "soul_sword", "name": "Soul Sword", "desc": "Heal 20% of damage dealt with sword hits (Stackable %)", "color": (150, 255, 150)},
-            {"type": "blood_sword", "name": "Blood Sword", "desc": "1.1x damage if hit again within 1s (Stackable duration)", "color": (255, 50, 50)},
-            {"type": "poison_spear", "name": "Poison Spear", "desc": "Deal 10% current HP on spear hits (Stackable %)", "color": (100, 255, 100)},
-            {"type": "thunder_mace", "name": "Thunder Mace", "desc": "10% chance for lightning on hammer hits (Stackable %/#)", "color": (255, 255, 100)},
             {"type": "soulburst", "name": "Soulburst", "desc": "Explode when taking damage (Stackable damage)", "color": (255, 150, 50)},
-            {"type": "multi_cast", "name": "Multi-Cast", "desc": "Magic/Axe projectile count +1 (Stackable #)", "color": (150, 100, 255)}
+            {"type": "score_fever", "name": "Score Fever", "desc": "Enemy HP/ATK +25%, Score x+0.5 (Stackable)", "color": (255, 200, 0)},
+            {"type": "berserker_gamble", "name": "Berserker's Gamble", "desc": "Damage taken +25%, Score x+0.5 (Stackable)", "color": (200, 50, 50)},
+            {"type": "vampiric_touch", "name": "Vampiric Touch", "desc": "15% chance to heal 1% MaxHP on kill (Stackable %)", "color": (150, 0, 0)},
+            {"type": "glass_cannon", "name": "Glass Cannon", "desc": "Halve MaxHP, deal 1.5x damage (Stackable dmg)", "color": (255, 50, 255)},
+            {"type": "phantom_step", "name": "Phantom Step", "desc": "10% chance to dodge damage (Max 80%)", "color": (200, 200, 255)},
+            {"type": "executioner", "name": "Executioner", "desc": "2x damage to enemies below 30% HP", "color": (100, 0, 100)},
+            {"type": "titans_grip", "name": "Titan's Grip", "desc": "Double knockback distance", "color": (150, 150, 150)}
         ]
+
+        if is_sword:
+            pool.append({"type": "soul_sword", "name": "Soul Sword", "desc": "Heal 20% of damage dealt with sword hits (Stackable %)", "color": (150, 255, 150)})
+            pool.append({"type": "blood_sword", "name": "Blood Sword", "desc": "1.1x damage if hit again within 1s (Stackable duration)", "color": (255, 50, 50)})
+        if is_spear:
+            pool.append({"type": "poison_spear", "name": "Poison Spear", "desc": "Deal 10% current HP on spear hits (Stackable %)", "color": (100, 255, 100)})
+        if is_hammer:
+            pool.append({"type": "thunder_mace", "name": "Thunder Mace", "desc": "10% chance for lightning on hammer hits (Stackable %/#)", "color": (255, 255, 100)})
+        if is_projectile:
+            pool.append({"type": "multi_cast", "name": "Multi-Cast", "desc": "Magic/Axe projectile count +1 (Stackable #)", "color": (150, 100, 255)})
+
         self.current_boss_rewards = random.sample(pool, 3)
 
     def apply_boss_reward(self, reward):
         """Applies a boss reward"""
         if reward["type"] == "slot_plus":
             self.upgrade_slots += 1
-        elif reward["type"] == "evolution":
+        elif reward["type"] == "limit_break":
             if self.skills:
                 s = random.choice(self.skills)
-                s.damage_bonus += 3
+                s.damage_multiplier *= 1.5
         elif reward["type"] == "hero_blessing":
             self.player.max_hp += 10
             self.player.hp = self.player.max_hp
@@ -1085,6 +1106,25 @@ class Character:
             self.player.soulburst_level += 1
         elif reward["type"] == "multi_cast":
             self.player.multi_cast_level += 1
+        elif reward["type"] == "score_fever":
+            self.player.difficulty_multiplier += 0.25
+            self.player.score_multiplier += 0.5
+        elif reward["type"] == "berserker_gamble":
+            self.player.damage_taken_multiplier += 0.25
+            self.player.score_multiplier += 0.5
+        elif reward["type"] == "vampiric_touch":
+            self.player.vampiric_touch_level += 1
+        elif reward["type"] == "glass_cannon":
+            self.player.glass_cannon_level += 1
+            self.player.max_hp = max(1, self.player.max_hp // 2)
+            self.player.hp = min(self.player.hp, self.player.max_hp)
+            self.player.damage_multiplier *= 1.5
+        elif reward["type"] == "phantom_step":
+            self.player.phantom_step_level += 1
+        elif reward["type"] == "executioner":
+            self.player.executioner_level += 1
+        elif reward["type"] == "titans_grip":
+            self.player.titans_grip_level += 1
         return True
 
 
@@ -1145,7 +1185,7 @@ class EnhancedFireSkill(Skill):
             if enemies:
                 for e in enemies:
                     if e.hp > 0 and e.x < b[0] < e.x + e.width and e.y < b[1] < e.y + e.height:
-                        if e.take_damage(2 + self.damage_bonus, 1 if b[2] > 0 else -1, element='fire'):
+                        if e.take_damage(int((2 + self.damage_bonus) * self.damage_multiplier), 1 if b[2] > 0 else -1, element='fire'):
                             hit = True
                             break
             if hit or b[4] <= 0:
@@ -1175,7 +1215,7 @@ class EruptionSkill(Skill):
                 er_rect = pygame.Rect(self.pillar_x - 40, ground - 300, 80, 300)
                 for e in enemies:
                     if e.hp > 0 and er_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                        e.take_damage(1 + self.damage_bonus, self.source_facing, element='fire') # Low damage (hits every frame)
+                        e.take_damage(int((1 + self.damage_bonus) * self.damage_multiplier), self.source_facing, element='fire') # Low damage (hits every frame)
     def draw_effect(self, screen):
         if self.active_timer > 0:
             # Flickering pillar of fire
@@ -1228,7 +1268,7 @@ class FlameDashSkill(Skill):
                 for e in enemies:
                     if e.hp > 0 and e not in hit_list and f_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                         e.burn_timer = 180
-                        if e.take_damage(1 + self.damage_bonus, f[3] if len(f)>3 else 1, status_effect=True, element='fire'):
+                        if e.take_damage(int((1 + self.damage_bonus) * self.damage_multiplier), f[3] if len(f)>3 else 1, status_effect=True, element='fire'):
                             hit_list.append(e)
             if f[2] <= 0:
                 self.flames.remove(f)
@@ -1263,7 +1303,7 @@ class MeteorSkill(Skill):
                         if e.hp > 0 and blast_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                             # Shockwave direction
                             sf = 1 if e.x > m[0] else -1
-                            e.take_damage(12 + self.damage_bonus, sf, element='fire')
+                            e.take_damage(int((12 + self.damage_bonus) * self.damage_multiplier), sf, element='fire')
                             e.burn_timer = 180 # Inflict burn
                 self.meteor = None
 
@@ -1340,7 +1380,7 @@ class Warrior(Character):
                     hammer_rect = pygame.Rect(hx - 50, hy - 50, 100, 100)
                     for e in enemies:
                         if e.hp > 0 and e not in self.hit_enemies and hammer_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            if e.take_damage(4 * self.player.damage_multiplier, self.player.facing, knockback_x=12, knockback_y=-8, element='heavy'): # High damage, large knockback
+                            if e.take_damage(4, self.player.facing, knockback_x=12, knockback_y=-8, element='heavy'): # High damage, large knockback
                                 # Thunder Mace effect
                                 if self.player.thunder_mace_level > 0:
                                     if random.random() < 0.1 * self.player.thunder_mace_level:
@@ -1490,7 +1530,7 @@ class JavelinThrowSkill(Skill):
                 er_rect = pygame.Rect(j[0], j[1] - 12, 40, 25)
                 for e in enemies:
                     if e.hp > 0 and e not in j[4] and er_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                        if e.take_damage(4 + self.damage_bonus, j[5]): # Piercing
+                        if e.take_damage(int((4 + self.damage_bonus) * self.damage_multiplier), j[5]): # Piercing
 
                             j[4].append(e)
             if j[3] <= 0:
@@ -1529,7 +1569,7 @@ class VaultingStrikeSkill(Skill):
                     blast = pygame.Rect(self.player_ref.x - 40, self.player_ref.y, 120, 40)
                     for e in enemies:
                         if e.hp > 0 and blast.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            e.take_damage(3 + self.damage_bonus, self.source_facing)
+                            e.take_damage(int((3 + self.damage_bonus) * self.damage_multiplier), self.source_facing)
     def draw_effect(self, screen):
         if self.active_timer > 0 and hasattr(self, 'player_ref') and self.player_ref:
             pygame.draw.circle(screen, (150, 255, 150), (int(self.player_ref.x+20), int(self.player_ref.y+20)), 30, 2)
@@ -1562,7 +1602,7 @@ class RapidThrustsSkill(Skill):
 
                     for e in enemies:
                         if e.hp > 0 and hitbox.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            e.take_damage(1 + self.damage_bonus, self.source_facing)
+                            e.take_damage(int((1 + self.damage_bonus) * self.damage_multiplier), self.source_facing)
                             # Pulling effect
 
                             pull_x = self.player_ref.x + 60 * self.player_ref.facing
@@ -1597,7 +1637,7 @@ class SweepingStrikeSkill(Skill):
                 hitbox = pygame.Rect(self.player_ref.x - 60, self.player_ref.y - 40, 160, 120)
                 for e in enemies:
                     if e.hp > 0 and e not in self.hit_enemies and hitbox.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                        if e.take_damage(4 + self.damage_bonus, self.source_facing, knockback_x=15):
+                        if e.take_damage(int((4 + self.damage_bonus) * self.damage_multiplier), self.source_facing, knockback_x=15):
                             self.hit_enemies.append(e)
     def draw_effect(self, screen):
         if self.active_timer > 0 and hasattr(self, 'player_ref') and self.player_ref:
@@ -1646,7 +1686,7 @@ class DragonDiveSkill(Skill):
                 dive_rect = pygame.Rect(self.player_ref.x - 20, self.player_ref.y, 80, 100)
                 for e in enemies:
                     if e.hp > 0 and e not in self.hit_enemies and dive_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                        if e.take_damage(8 + self.damage_bonus, self.source_facing, element='heavy'):
+                        if e.take_damage(int((8 + self.damage_bonus) * self.damage_multiplier), self.source_facing, element='heavy'):
                             self.hit_enemies.append(e)
 
             # Trigger on ground impact (using a generous 10px margin)
@@ -1658,7 +1698,7 @@ class DragonDiveSkill(Skill):
                     blast = pygame.Rect(self.player_ref.x - 120, self.player_ref.y - 60, 280, 110)
                     for e in enemies:
                         if e.hp > 0 and blast.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            e.take_damage(10 + self.damage_bonus, self.source_facing, knockback_y=-15, element='heavy')
+                            e.take_damage(int((10 + self.damage_bonus) * self.damage_multiplier), self.source_facing, knockback_y=-15, element='heavy')
     def draw_effect(self, screen):
         if (self.phase == 1 or self.phase == 2) and hasattr(self, 'player_ref') and self.player_ref:
             pygame.draw.circle(screen, (100, 255, 255), (int(self.player_ref.x+20), int(self.player_ref.y+20)), 25)
@@ -2369,7 +2409,7 @@ class AlHumaSkill(Skill):
             if enemies and b[4] == 1:
                 for e in enemies:
                     if e.hp > 0 and e.x < b[0] < e.x + e.width and e.y < b[1] < e.y + e.height:
-                        e.take_damage(2 + self.damage_bonus, 1 if b[2] > 0 else -1, element='ice', ignore_iframes=True)
+                        e.take_damage(int((2 + self.damage_bonus) * self.damage_multiplier), 1 if b[2] > 0 else -1, element='ice', ignore_iframes=True)
                         hit = True
                         break
             if not hit and -100 < b[0] < width + 100 and -100 < b[1] < height + 100:
@@ -2418,7 +2458,7 @@ class BlizzardLanceSkill(Skill):
             if enemies:
                 for e in enemies:
                     if e.hp > 0 and e not in l[4] and e.x < l[0] + 60 and l[0] - 60 < e.x + e.width and e.y < l[1] + 15 and l[1] - 15 < e.y + e.height:
-                        e.take_damage(10 + self.damage_bonus, 1 if l[2] > 0 else -1, knockback_x=5, element='ice', ignore_iframes=True)
+                        e.take_damage(int((10 + self.damage_bonus) * self.damage_multiplier), 1 if l[2] > 0 else -1, knockback_x=5, element='ice', ignore_iframes=True)
                         l[4].append(e)
             if not (-200 < l[0] < width + 200):
                 self.lance = None
@@ -2474,7 +2514,7 @@ class CocytusSkill(Skill):
                 for e in enemies:
                     if e.hp > 0:
                         e.frozen_timer = 80
-                        e.take_damage(5 + self.damage_bonus, 0, element='ice')
+                        e.take_damage(int((5 + self.damage_bonus) * self.damage_multiplier), 0, element='ice')
             return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
@@ -2685,7 +2725,7 @@ class BlackHoleSkill(Skill):
                             dx = self.bh_x - (e.x + e.width/2)
                             dy = self.bh_y - (e.y + e.height/2)
                             if math.hypot(dx, dy) < 250:
-                                e.take_damage(10 + self.damage_bonus, 1 if dx < 0 else -1, element='dark', ignore_iframes=True)
+                                e.take_damage(int((10 + self.damage_bonus) * self.damage_multiplier), 1 if dx < 0 else -1, element='dark', ignore_iframes=True)
     def draw_effect(self, screen):
         if self.active_timer > 0:
             radius = 60 + math.sin(pygame.time.get_ticks() * 0.01) * 15
@@ -2727,7 +2767,7 @@ class ElMinyaSkill(Skill):
             if enemies:
                 for e in enemies:
                     if e.hp > 0 and e.x <= b[0] <= e.x + e.width and e.y <= b[1] <= e.y + e.height:
-                        e.take_damage(5 if not b[5] else 2 + self.damage_bonus, 1 if b[2] > 0 else -1, element='dark', ignore_iframes=True)
+                        e.take_damage(5 if not b[5] else int((2 + self.damage_bonus) * self.damage_multiplier), 1 if b[2] > 0 else -1, element='dark', ignore_iframes=True)
                         hit = True
                         if not b[5]: split_trigger = True
                         break
@@ -2788,7 +2828,7 @@ class DarkPulseSkill(Skill):
                         dx = (e.x + e.width/2) - p['cx']
                         dy = (e.y + e.height/2) - p['cy']
                         if math.hypot(dx, dy) < 300:
-                            e.take_damage(8 + self.damage_bonus, 1 if dx > 0 else -1, knockback_x=15, knockback_y=-5, element='dark', ignore_iframes=True)
+                            e.take_damage(int((8 + self.damage_bonus) * self.damage_multiplier), 1 if dx > 0 else -1, knockback_x=15, knockback_y=-5, element='dark', ignore_iframes=True)
                             e.darkness_timer = 300
                             p['hit'].append(e)
             if p['timer'] > 0:
@@ -2843,7 +2883,7 @@ class ShadowStepSkill(Skill):
                         dx = (e.x + e.width/2) - exp[0]
                         dy = (e.y + e.height/2) - exp[1]
                         if math.hypot(dx, dy) < 120:
-                            e.take_damage(10 + self.damage_bonus, 1 if dx > 0 else -1, element='dark', ignore_iframes=True)
+                            e.take_damage(int((10 + self.damage_bonus) * self.damage_multiplier), 1 if dx > 0 else -1, element='dark', ignore_iframes=True)
             if exp[2] > 0:
                 new_exp.append(exp)
         self.explosions = new_exp
@@ -2887,7 +2927,7 @@ class AbyssRaySkill(Skill):
                     beam_rect = pygame.Rect(self.player_ref.x + 20 - beam_width, beam_y, beam_width, 40)
                 for e in enemies:
                     if e.hp > 0 and beam_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                        e.take_damage(2 + self.damage_bonus, self.player_ref.facing, element='dark', ignore_iframes=True)
+                        e.take_damage(int((2 + self.damage_bonus) * self.damage_multiplier), self.player_ref.facing, element='dark', ignore_iframes=True)
     def draw_effect(self, screen):
         if self.active_timer > 0 and self.player_ref:
             beam_width = width
@@ -3009,7 +3049,7 @@ class AutoCrossbowSkill(Skill):
                 for e in enemies:
                     if e.hp > 0 and e.x <= a[0] <= e.x + e.width and e.y <= a[1] <= e.y + e.height:
                         if e not in a[4]:
-                            e.take_damage(3 + self.damage_bonus, 1 if a[2] > 0 else -1, ignore_iframes=True)
+                            e.take_damage(int((3 + self.damage_bonus) * self.damage_multiplier), 1 if a[2] > 0 else -1, ignore_iframes=True)
                             a[4].append(e)
                             hit = True
                             break
@@ -3044,7 +3084,7 @@ class BearTrapSkill(Skill):
                 trap_rect = pygame.Rect(t[0] - 20, t[1] - 10, 40, 20)
                 for e in enemies:
                     if e.hp > 0 and trap_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                        e.take_damage(5 + self.damage_bonus, 0)
+                        e.take_damage(int((5 + self.damage_bonus) * self.damage_multiplier), 0)
                         e.frozen_timer = max(getattr(e, 'frozen_timer', 0), 120)
                         t[2] = True
                         break
@@ -3061,7 +3101,7 @@ class BearTrapSkill(Skill):
                         dx = (e.x + e.width/2) - exp[0]
                         dy = (e.y + e.height/2) - exp[1]
                         if math.hypot(dx, dy) < 100:
-                            e.take_damage(5 + self.damage_bonus, 1 if dx > 0 else -1)
+                            e.take_damage(int((5 + self.damage_bonus) * self.damage_multiplier), 1 if dx > 0 else -1)
             if exp[2] > 0:
                 new_exp.append(exp)
         self.explosions = new_exp
@@ -3256,6 +3296,23 @@ class Player:
         self.multi_cast_level = 0
         self._soulburst_explosions = []
 
+        # Score System
+        self.score = 0
+        self.score_multiplier = 1.0
+        self.wave_damage_taken = False
+        self.combo_count = 0
+        self.combo_timer = 0
+        self.score_popups = []  # [(x, y, text, timer, color)]
+        self.difficulty_multiplier = 1.0
+        self.damage_taken_multiplier = 1.0
+        self.vampiric_touch_level = 0
+        self.glass_cannon_level = 0
+        self.phantom_step_level = 0
+        self.executioner_level = 0
+        self.titans_grip_level = 0
+        self.damage_multiplier = 1.0
+        self.damage_taken_multiplier = 1.0
+
         self.skill_m = MirrorSkill(15, 15)
         self.skill_g = GravitySkill(75, 15)
         self.skill_i = IceSkill(135, 15)
@@ -3312,6 +3369,20 @@ class Player:
         self.soulburst_level = 0
         self.multi_cast_level = 0
         self._soulburst_explosions = []
+        self.score = 0
+        self.score_multiplier = 1.0
+        self.wave_damage_taken = False
+        self.combo_count = 0
+        self.combo_timer = 0
+        self.score_popups = []
+        self.difficulty_multiplier = 1.0
+        self.damage_taken_multiplier = 1.0
+        self.vampiric_touch_level = 0
+        self.glass_cannon_level = 0
+        self.phantom_step_level = 0
+        self.executioner_level = 0
+        self.titans_grip_level = 0
+        self.damage_multiplier = 1.0
         self.skills = [self.skill_m, self.skill_g, self.skill_i, self.skill_d, self.skill_l, self.skill_f, self.skill_t]
 
     def update(self, keys, enemies):
@@ -3434,7 +3505,7 @@ class Player:
             if self.blood_sword_level > 0 and self.blood_sword_hits > 0:
                 blood_mult = 1.1 ** self.blood_sword_hits
             
-            damage = int(base_dmg * blood_mult * getattr(self, 'damage_multiplier', 1.0))
+            damage = int(base_dmg * blood_mult)
             p_center_x = self.x + 20 * self.facing + 20
             p_center_y = self.y + 20
             swing_progress = (12 - self.swording) / 12.0
@@ -3478,6 +3549,17 @@ class Player:
         if self.character:
             self.character.draw_effects(screen)
             self.character.draw_ui(screen)
+        
+        # Score popups
+        if not hasattr(Character, '_font_popup') or Character._font_popup is None:
+            Character._font_popup = pygame.font.SysFont(None, 28)
+        for p in self.score_popups:
+            alpha = min(255, p[3] * 6)
+            surf = Character._font_popup.render(p[2], True, p[4])
+            alpha_surf = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+            alpha_surf.fill((255, 255, 255, alpha))
+            surf.blit(alpha_surf, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            screen.blit(surf, (int(p[0]), int(p[1])))
         
         if game_state == STATE_LOBBY:
             for s in self.skills:
@@ -3528,6 +3610,21 @@ class Player:
                 new_sb_exp.append(exp)
         self._soulburst_explosions = new_sb_exp
 
+        # Combo timer
+        if self.combo_timer > 0:
+            self.combo_timer -= 1
+            if self.combo_timer <= 0:
+                self.combo_count = 0
+
+        # Score popups
+        new_popups = []
+        for p in self.score_popups:
+            p[3] -= 1  # timer
+            p[1] -= 1  # float up
+            if p[3] > 0:
+                new_popups.append(p)
+        self.score_popups = new_popups
+
         if self.character: self.character.update_timers()
 
     def take_damage(self, amount, source_facing=1):
@@ -3537,14 +3634,28 @@ class Player:
             return False
 
         if self.invincible_timer > 0: return False
+        
+        # Phantom Step dodge check
+        if getattr(self, 'phantom_step_level', 0) > 0:
+            dodge_chance = min(0.8, self.phantom_step_level * 0.1)
+            if random.random() < dodge_chance:
+                if hasattr(self, 'score_popups'):
+                    self.score_popups.append([self.x, self.y - 20, "DODGE!", 40, (150, 150, 255)])
+                self.invincible_timer = 20 # Brief iframe after dodge
+                return False
+
         if self.hit_timer == 0:
             amount = max(0, amount - self.defense) # Reduce by defense (0 damage allowed)
             if amount <= 0:
                 self.hit_timer = 10 # Short invincibility prevents multiple hits
                 return False # 0 damage so no damage
+            # Apply damage taken multiplier (Berserker's Gamble)
+            amount = int(amount * getattr(self, 'damage_taken_multiplier', 1.0))
+            amount = max(1, amount)  # At least 1 damage if not blocked by defense
             self.hp -= amount
             self.hit_timer = 40
             self.vx = source_facing * 10 # Knockback
+            self.wave_damage_taken = True
             
             # Soulburst
             if getattr(self, 'soulburst_level', 0) > 0:
@@ -3601,6 +3712,7 @@ class Enemy:
         self.darkness_timer = 0
         self.spawn_timer = 0
         self.debris_particles = []
+        self.scored = False
 
     def update(self, player):
         if self.spawn_timer > 0:
@@ -3696,6 +3808,19 @@ class Enemy:
     def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None, ignore_iframes=False):
         if self.hp <= 0: return False
         if self.spawn_timer > 0: return False  # Invulnerable during spawn animation
+
+        # Apply global damage multiplier (Glass Cannon)
+        damage = int(damage * getattr(player, 'damage_multiplier', 1.0))
+
+        # Executioner check
+        if getattr(player, 'executioner_level', 0) > 0:
+            if self.hp / self.max_hp < 0.3:
+                damage *= 2
+
+        # Titan's Grip check
+        if getattr(player, 'titans_grip_level', 0) > 0:
+            knockback_x *= 2
+            knockback_y *= 2
         
         # Elemental synergy
 
@@ -4386,6 +4511,10 @@ def start_next_wave():
     if is_reincarnMode and wave_number > 0 and wave_number % 5 == 0:
         boss_hp = 60 + (wave_number // 5 - 1) * 40 # 100+80n -> 60+40n
         boss_atk = 2 + (wave_number // 5 - 1)
+        # Apply difficulty multiplier (Score Fever)
+        diff_mult = getattr(player, 'difficulty_multiplier', 1.0)
+        boss_hp = int(boss_hp * diff_mult)
+        boss_atk = int(boss_atk * diff_mult)
         enemies.append(BlockGolemBoss(width // 2 - 50, ground - 100, hp=boss_hp, attack_damage=boss_atk))
         return
 
@@ -4420,6 +4549,11 @@ def start_next_wave():
     
     enemy_hp = 3 + hp_bonus
     enemy_atk = 1 + atk_bonus
+    
+    # Apply difficulty multiplier (Score Fever)
+    diff_mult = getattr(player, 'difficulty_multiplier', 1.0)
+    enemy_hp = int(enemy_hp * diff_mult)
+    enemy_atk = max(1, int(enemy_atk * diff_mult))
     
     for i in range(num_enemies):
         rx = random.randint(100, width - 100)
@@ -4790,10 +4924,41 @@ async def main():
                     if e.hp > 0:
                         e.update(player)
                         active_enemies += 1
-                    elif isinstance(e, BomberEnemy) and e.exploded and e.explosion_timer > 0:
-                        if e.explosion_timer == 20:
-                            e.explode(player)
-                        e.explosion_timer -= 1
+                    else:
+                        # Score on kill (Reincarnator mode only)
+                        if not e.scored and player.character and getattr(player.character, 'is_reincarnator_mode', False):
+                            e.scored = True
+                            # Base score by enemy type
+                            score_table = {
+                                'RedEnemy': 100, 'PinkEnemy': 100, 'GreenEnemy': 120,
+                                'ShieldEnemy': 150, 'HealerEnemy': 130, 'BomberEnemy': 110,
+                                'SniperEnemy': 140, 'BlockGolemBoss': 2000
+                            }
+                            base = score_table.get(type(e).__name__, 100)
+                            # Wave bonus
+                            wave_bonus = 1.0 + wave_number * 0.05
+                            # Combo bonus
+                            player.combo_count += 1
+                            player.combo_timer = 180  # 3 seconds
+                            combo_bonus = min(2.0, 1.0 + (player.combo_count - 1) * 0.1)
+                            # Total score
+                            total = int(base * wave_bonus * combo_bonus * player.score_multiplier)
+                            player.score += total
+                            # Popup
+                            popup_color = (255, 255, 100) if combo_bonus > 1.0 else (255, 255, 255)
+                            player.score_popups.append([e.x, e.y - 10, f"+{total}", 50, popup_color])
+                            
+                            # Vampiric Touch
+                            if getattr(player, 'vampiric_touch_level', 0) > 0:
+                                if random.random() < 0.15:
+                                    heal_amt = max(1, int(player.max_hp * 0.01))
+                                    player.hp = min(player.max_hp, player.hp + heal_amt)
+                                    player.score_popups.append([player.x, player.y - 40, f"HEAL +{heal_amt}", 40, (100, 255, 100)])
+                        
+                        if isinstance(e, BomberEnemy) and e.exploded and e.explosion_timer > 0:
+                            if e.explosion_timer == 20:
+                                e.explode(player)
+                            e.explosion_timer -= 1
                     e.update_debris()
 
                 # Update enemy bullets
@@ -4804,6 +4969,17 @@ async def main():
                 # Next wave when cleared (with interval)
                 if is_combat_mode and active_enemies == 0:
                     if wave_clear_timer <= 0:
+                        # Wave clear bonus (Reincarnator mode)
+                        is_reincarn_sc = player.character and getattr(player.character, 'is_reincarnator_mode', False)
+                        if is_reincarn_sc:
+                            clear_bonus = int(200 * wave_number * player.score_multiplier)
+                            if not player.wave_damage_taken:
+                                clear_bonus *= 2  # No-damage bonus
+                                player.score_popups.append([width // 2 - 80, height // 2 - 60, f"NO DAMAGE! +{clear_bonus}", 80, (255, 200, 50)])
+                            else:
+                                player.score_popups.append([width // 2 - 60, height // 2 - 60, f"CLEAR +{clear_bonus}", 60, (200, 255, 200)])
+                            player.score += clear_bonus
+                            player.wave_damage_taken = False
                         wave_clear_timer = 120 # Wait 2 seconds
                     else:
                         wave_clear_timer -= 1
@@ -4850,6 +5026,22 @@ async def main():
             if is_combat_mode:
                 wave_text = font_main.render(f"WAVE: {wave_number}", True, (0, 0, 0))
                 screen.blit(wave_text, (width - 320, 70))
+                
+                # Score display (Reincarnator mode)
+                is_reincarn_hud = player.character and getattr(player.character, 'is_reincarnator_mode', False)
+                if is_reincarn_hud:
+                    score_str = f"{player.score:,}"
+                    score_text = font_main.render(f"SCORE: {score_str}", True, (50, 50, 150))
+                    screen.blit(score_text, (width // 2 - score_text.get_width() // 2, 10))
+                    # Score multiplier display
+                    if player.score_multiplier > 1.0:
+                        mult_text = font_settings_hint.render(f"x{player.score_multiplier:.1f}", True, (255, 200, 0))
+                        screen.blit(mult_text, (width // 2 + score_text.get_width() // 2 + 5, 15))
+                    # Combo display
+                    if player.combo_count >= 2:
+                        combo_text = font_main.render(f"COMBO x{player.combo_count}!", True, (255, 200, 50))
+                        screen.blit(combo_text, (width // 2 - combo_text.get_width() // 2, 45))
+                
                 if wave_clear_timer > 0:
                     clear_text = font_main.render(f"WAVE {wave_number} CLEARED!", True, (0, 150, 0))
                     screen.blit(clear_text, (width // 2 - 150, height // 2 - 100))
@@ -5216,10 +5408,23 @@ async def main():
             overlay.fill((200, 0, 0, 150))
             screen.blit(overlay, (0, 0))
             go_text = font_gameover.render("GAME OVER", True, (255, 255, 255))
+            screen.blit(go_text, (width//2 - 220, height//2 - 70))
+            
+            # Final score display (Reincarnator mode)
+            is_reincarn_go = player.character and getattr(player.character, 'is_reincarnator_mode', False)
+            if is_reincarn_go:
+                score_str = f"{player.score:,}"
+                final_score_text = font_main.render(f"FINAL SCORE: {score_str}", True, (255, 215, 0))
+                screen.blit(final_score_text, (width//2 - final_score_text.get_width()//2, height//2 + 10))
+                wave_info = font_settings_hint.render(f"Wave Reached: {wave_number}", True, (200, 200, 200))
+                screen.blit(wave_info, (width//2 - wave_info.get_width()//2, height//2 + 50))
+                retry_y_offset = 80
+            else:
+                retry_y_offset = 50
+            
             retry_label = "Tap" if smartphone_mode else "Press 'R'"
             retry_text = font_main.render(f"{retry_label} to Retry", True, (255, 255, 255))
-            screen.blit(go_text, (width//2 - 220, height//2 - 50))
-            screen.blit(retry_text, (width//2 - 150, height//2 + 50))
+            screen.blit(retry_text, (width//2 - 150, height//2 + retry_y_offset))
 
             if keys[pygame.K_r]:
                 player = Player()
