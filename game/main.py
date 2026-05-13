@@ -4474,8 +4474,14 @@ async def main():
 
     running = True
     is_fullscreen = False
+    skip_render_this_frame = False
 
     while running:
+        if smartphone_mode:
+            skip_render_this_frame = not skip_render_this_frame
+        else:
+            skip_render_this_frame = False
+
         # Update virtual key states for smartphone ---
         if smartphone_mode:
             touch_keys['left'] = any(V_PAD['left'].collidepoint(pos) for pos in active_fingers.values())
@@ -4821,6 +4827,12 @@ async def main():
                                     player.hp = min(player.max_hp, player.hp + 5)
                                 start_next_wave()
                                 wave_clear_timer = 0
+
+        # Smartphone mode power saving: skip rendering every other frame
+        if skip_render_this_frame:
+            clock.tick(60)
+            await asyncio.sleep(0)
+            continue
 
         # Draw
         screen.fill((155, 155, 155))
