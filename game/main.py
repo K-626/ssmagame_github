@@ -2424,22 +2424,81 @@ class IceBrandArtsSkill(Skill):
         super().__init__(x, y, 1200, (100, 200, 255), (0, 150, 255))
         self.active_timer = 0
         self.initial_duration = 600
+        self.hit_enemies = []
+        self.player_ref = None
+
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
             self.active_timer = 600
             self.player_ref = player
             player._ice_brand_timer = 600
+            self.hit_enemies = []
             return True
         return False
+
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
         if self.active_timer > 0:
             self.active_timer -= 1
             if self.player_ref:
                 self.player_ref._ice_brand_timer = self.active_timer
+                self.player_ref.move_speed = max(getattr(self.player_ref, 'move_speed', 0), 1.6)
+                
+                # Hitbox logic
+                if self.player_ref.swording > 0:
+                    p = self.player_ref
+                    if p.swording == 24: # Clear hits at start of swing
+                        self.hit_enemies = []
+                    
+                    cx, cy = p.x + 20, p.y + 20
+                    max_swing = 25
+                    progress = (max_swing - p.swording) / max_swing
+                    base_angle = 0 if p.facing == 1 else 180
+                    sword_len = 200
+                    
+                    a1 = base_angle + (-110 + 190 * progress) * p.facing
+                    progress2 = max(0, min(1.0, (progress - 0.3) / 0.7))
+                    a2 = base_angle + (-110 + 190 * progress2) * p.facing
+                    
+                    # Damage calculation
+                    base_dmg = 2 + p.bonus_damage
+                    blood_mult = 1.0
+                    if p.blood_sword_level > 0 and p.blood_sword_hits > 0:
+                        blood_mult = 1.1 ** p.blood_sword_hits
+                    damage = int(base_dmg * blood_mult * getattr(p, 'damage_multiplier', 1.0))
+
+                    for angle in [a1, a2]:
+                        rad = math.radians(angle)
+                        for dist_step in range(1, 13):
+                            d = (sword_len * dist_step) / 12.0
+                            hx, hy = cx + d * math.cos(rad), cy + d * math.sin(rad)
+                            for e in enemies:
+                                if e.hp > 0 and e not in self.hit_enemies and e.x <= hx <= e.x + e.width and e.y <= hy <= e.y + e.height:
+                                    if e.take_damage(damage, p.facing, element='ice'):
+                                        self.hit_enemies.append(e)
+                                        e.frozen_timer = max(e.frozen_timer, 30)
+                                        if p.character: p.character.on_sword_hit(e, p.facing, damage)
+
     def draw_effect(self, screen):
-        if self.active_timer > 0 and hasattr(self, 'player_ref') and self.player_ref:
-            pygame.draw.circle(screen, (100, 200, 255), (int(self.player_ref.x+20), int(self.player_ref.y+20)), 35, 2)
+        if self.active_timer > 0 and self.player_ref:
+            p = self.player_ref
+            pygame.draw.circle(screen, (100, 200, 255), (int(p.x+20), int(p.y+20)), 35, 2)
+            
+            if p.swording > 0:
+                cx, cy = int(p.x + 20), int(p.y + 20)
+                max_swing = 25
+                progress = (max_swing - p.swording) / max_swing
+                base_angle = 0 if p.facing == 1 else 180
+                sword_len = 200
+                
+                a1 = base_angle + (-110 + 190 * progress) * p.facing
+                a2 = base_angle + (-110 + 190 * max(0, min(1.0, (progress - 0.3) / 0.7))) * p.facing
+                
+                for angle, color in [(a1, (200, 255, 255)), (a2, (100, 200, 255))]:
+                    rad = math.radians(angle)
+                    ex = cx + sword_len * math.cos(rad)
+                    ey = cy + sword_len * math.sin(rad)
+                    pygame.draw.line(screen, color, (cx, cy), (int(ex), int(ey)), 12)
 
 class BlizzardLanceSkill(Skill):
     def __init__(self, x, y):
@@ -2548,10 +2607,7 @@ class IceMage(Character):
 
     def attack(self, enemies):
         if getattr(self.player, '_ice_brand_timer', 0) > 0:
-            if self.player.swording <= 0:
-                self.player.swording = 25 # Slowed down from 15
-                self.hit_enemies = []
-                self.player.hit_timer = max(self.player.hit_timer, 20)
+            pass # Handled globally in Player.update
         else:
             vx = 20 * self.player.facing
             count = 1 + getattr(self.player, 'multi_cast_level', 0)
@@ -2588,44 +2644,6 @@ class IceMage(Character):
             if hit or b[3] <= 0:
                 self.ice_blocks.remove(b)
         
-        # Ice Brand Arts Sweep Hitbox
-        if getattr(self.player, '_ice_brand_timer', 0) > 0 and self.player.swording > 0:
-            p = self.player
-            cx, cy = p.x + 20, p.y + 20
-            max_swing = 25
-            progress = (max_swing - p.swording) / max_swing
-            base_angle = 0 if p.facing == 1 else 180
-            sword_len = 200
-            
-            # Arcs for both swords (Both downward, second one delayed)
-            # Starts top-back (-110), swings to bottom-front (80)
-            a1 = base_angle + (-110 + 190 * progress) * p.facing
-            
-            # Second sword delay (starts when first is 30% through)
-            progress2 = max(0, min(1.0, (progress - 0.3) / 0.7))
-            a2 = base_angle + (-110 + 190 * progress2) * p.facing
-            
-            # Damage calculation (including Blood Sword)
-            base_dmg = 2 + self.player.bonus_damage
-            blood_mult = 1.0
-            if p.blood_sword_level > 0 and p.blood_sword_hits > 0:
-                blood_mult = 1.1 ** p.blood_sword_hits
-            damage = int(base_dmg * blood_mult * getattr(p, 'damage_multiplier', 1.0))
-
-            # Check multiple points along both sword blades (increased density for 350 radius)
-            for angle in [a1, a2]:
-                rad = math.radians(angle)
-                for dist_step in range(1, 13):
-                    d = (sword_len * dist_step) / 12.0
-                    hx, hy = cx + d * math.cos(rad), cy + d * math.sin(rad)
-                    
-                    for e in enemies:
-                        if e.hp > 0 and e not in self.hit_enemies and e.x <= hx <= e.x + e.width and e.y <= hy <= e.y + e.height:
-                            if e.take_damage(damage, p.facing, element='ice'):
-                                self.hit_enemies.append(e)
-                                e.frozen_timer = max(e.frozen_timer, 30)
-                                self.on_sword_hit(e, p.facing, damage)
-        
         if getattr(self.player, '_ice_brand_timer', 0) > 0:
             self.player.move_speed = 1.6
         else:
@@ -2635,61 +2653,7 @@ class IceMage(Character):
         super().draw_effects(screen)
         for b in self.ice_blocks:
             pygame.draw.rect(screen, (200, 255, 255), (int(b[0]), int(b[1]), 15, 15))
-        
-        if getattr(self.player, '_ice_brand_timer', 0) > 0 and self.player.swording > 0:
-            p = self.player
-            cx = int(p.x + 20)
-            cy = int(p.y + 20)
-            max_swing = 25
-            progress = (max_swing - p.swording) / max_swing
-            base_angle = 0 if p.facing == 1 else 180
-            sword_len = 200
-            
-            # Arcs matching update() logic
-            # Sword 1
-            angle1 = base_angle + (-110 + 190 * progress) * p.facing
-            rad1 = math.radians(angle1)
-            ex1 = cx + sword_len * math.cos(rad1)
-            ey1 = cy + sword_len * math.sin(rad1)
-            
-            # Sword 2 (Delayed)
-            progress2 = max(0, min(1.0, (progress - 0.3) / 0.7))
-            angle2 = base_angle + (-110 + 190 * progress2) * p.facing
-            rad2 = math.radians(angle2)
-            ex2 = cx + sword_len * math.cos(rad2)
-            ey2 = cy + sword_len * math.sin(rad2)
-            
-            # Afterimage trails (single surface for all trails)
-            trail_surf = pygame.Surface((sword_len * 2 + 40, sword_len * 2 + 40), pygame.SRCALPHA)
-            tc_x = sword_len + 20
-            tc_y = sword_len + 20
-            for i in range(3):
-                # Trail 1
-                trail_p1 = max(0, progress - i * 0.06)
-                ta1 = base_angle + (-110 + 190 * trail_p1) * p.facing
-                tr1 = math.radians(ta1)
-                tx1 = tc_x + sword_len * math.cos(tr1)
-                ty1 = tc_y + sword_len * math.sin(tr1)
-                t_alpha = 200 - i * 60
-                if t_alpha > 0:
-                    pygame.draw.line(trail_surf, (100, 200, 255, t_alpha), (tc_x, tc_y), (int(tx1), int(ty1)), 8 - i * 2)
 
-                # Trail 2
-                trail_p2 = max(0, progress2 - i * 0.06)
-                ta2 = base_angle + (-110 + 190 * trail_p2) * p.facing
-                tr2 = math.radians(ta2)
-                tx2 = tc_x + sword_len * math.cos(tr2)
-                ty2 = tc_y + sword_len * math.sin(tr2)
-                if t_alpha > 0:
-                    pygame.draw.line(trail_surf, (100, 200, 255, t_alpha), (tc_x, tc_y), (int(tx2), int(ty2)), 8 - i * 2)
-            screen.blit(trail_surf, (cx - tc_x, cy - tc_y))
-
-            # Main swords (Thicker lines)
-            pygame.draw.line(screen, (150, 255, 255), (cx, cy), (int(ex1), int(ey1)), 12)
-            pygame.draw.line(screen, (200, 255, 255), (cx, cy), (int(ex2), int(ey2)), 12)
-            # Sword tips glow
-            pygame.draw.circle(screen, (220, 255, 255), (int(ex1), int(ey1)), 10)
-            pygame.draw.circle(screen, (220, 255, 255), (int(ex2), int(ey2)), 10)
 
 class BlackHoleSkill(Skill):
     def __init__(self, x, y):
@@ -3493,18 +3457,23 @@ class Player:
             if self.x <= 10: self.x = 10
             if self.x >= width - 40: self.x = width - 40
 
-        # Smartphone attack detection (with 3-frame minimum cooldown)
+        # Attack detection with cooldown
+        is_attacking = (smartphone_mode and touch_keys['attack']) or keys[key_config['attack']] or \
+                       (getattr(self, 'character', None) and getattr(self.character, 'auto_attack', False))
 
-        if smartphone_mode and touch_keys['attack'] and self.swording <= 0 and self.attack_cooldown <= 0:
-            self.attack_cooldown = 3  # Minimum 3-frame interval between attacks
-            if self.character:
+        if is_attacking and self.swording <= 0 and self.attack_cooldown <= 0:
+            self.attack_cooldown = 4 # Standardized 4-frame cooldown
+            if getattr(self, '_ice_brand_timer', 0) > 0:
+                self.swording = 25
+                self.hit_timer = max(self.hit_timer, 20)
+            elif self.character:
                 self.character.attack(enemies)
             else:
                 self.swording = 12
 
 
         # Hide standard sword if Ice Brand is active
-        ice_brand_active = getattr(self, '_ice_brand_timer', 0) > 0 and self.character and type(self.character).__name__ == "IceMage"
+        ice_brand_active = getattr(self, '_ice_brand_timer', 0) > 0
         dark_mage_active = self.character and type(self.character).__name__ == "DarkMage"
         hunter_active = self.character and type(self.character).__name__ == "Hunter"
 
@@ -3579,7 +3548,7 @@ class Player:
                 s.draw(screen)
         
         # Hide standard sword if Ice Brand is active
-        ice_brand_active = getattr(self, '_ice_brand_timer', 0) > 0 and self.character and type(self.character).__name__ == "IceMage"
+        ice_brand_active = getattr(self, '_ice_brand_timer', 0) > 0
         dark_mage_active = self.character and type(self.character).__name__ == "DarkMage"
         hunter_active = self.character and type(self.character).__name__ == "Hunter"
 
