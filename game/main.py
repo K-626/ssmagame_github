@@ -3278,7 +3278,6 @@ class Player:
         self.hit_timer = 0            # Hit knockback/flashing timer
         self.prev_touch_up = False    # Jump input tracking for smartphone mode
         self.attack_cooldown = 0      # Minimum cooldown between attacks (smartphone anti-spam)
-        self.frozen_timer = 0         # Frozen status timer
 
 
 
@@ -3388,16 +3387,6 @@ class Player:
 
     def update(self, keys, enemies):
         global hit_stop_timer, game_state
-        if self.frozen_timer > 0:
-            self.frozen_timer -= 1
-            self.vx *= 0.9
-            self.vy += 0.8
-            self.y += self.vy
-            if self.y > ground - 40:
-                self.y = ground - 40
-                self.vy = 0
-            return
-
         if self.hit_timer > 0: self.hit_timer -= 1
 
         self.ax = 0
@@ -3701,27 +3690,6 @@ class EnemyBullet:
                 return True # Hit
 
         return False
-
-class HomingEnemyBullet(EnemyBullet):
-    def __init__(self, x, y, angle, damage=1, turn_speed=0.03):
-        super().__init__(x, y, angle, damage)
-        self.turn_speed = turn_speed
-    def update(self, player):
-        target_angle = math.atan2(player.y + 20 - self.y, player.x + 20 - self.x)
-        current_angle = math.atan2(self.vy, self.vx)
-        angle_diff = (target_angle - current_angle + math.pi) % (2 * math.pi) - math.pi
-        new_angle = current_angle + max(-self.turn_speed, min(self.turn_speed, angle_diff))
-        self.vx = math.cos(new_angle) * self.speed
-        self.vy = math.sin(new_angle) * self.speed
-        return super().update(player)
-
-class FrostEnemyBullet(EnemyBullet):
-    def update(self, player):
-        if player.x <= self.x <= player.x + 40 and player.y <= self.y <= player.y + 40:
-            if player.take_damage(self.damage, 1 if self.vx > 0 else -1):
-                player.frozen_timer = 60 # 1 second freeze
-                return True
-        return super().update(player)
 
     def draw(self, screen):
         pygame.draw.rect(screen, (255, 100, 255), (int(self.x), int(self.y), self.width, self.height))
@@ -4524,147 +4492,6 @@ class BlockGolemBoss(Enemy):
             r = int((30 - self.shockwave_timer) * 10)
             pygame.draw.ellipse(screen, (255, 255, 200), (self.x + 50 - r, ground - 20, r * 2, 40), 2)
 
-class ShadowWeaverBoss(Enemy):
-    def __init__(self, x, y, hp=80, attack_damage=2):
-        super().__init__(x, y, hp, (128, 0, 128), 'boss', attack_damage)
-        self.width, self.height = 80, 80
-        self.action_timer = 0
-        self.current_action = None
-        self.void_zones = []
-
-    def _update_behavior(self, player):
-        for vz in self.void_zones[:]:
-            vz[2] -= 1
-            if vz[2] <= 0: self.void_zones.remove(vz)
-            elif player.x < vz[0] + 100 and vz[0] < player.x + player.width and player.y + player.height >= ground - 20:
-                player.vx *= 0.5 # Slow down
-        
-        if self.action_timer > 0:
-            self.action_timer -= 1
-            if self.current_action == 'shoot' and self.action_timer % 20 == 0:
-                angle = math.atan2(player.y+20 - (self.y+40), player.x+20 - (self.x+40))
-                enemy_bullets.append(HomingEnemyBullet(self.x+40, self.y+40, angle, self.attack_damage))
-            return
-
-        r = random.random()
-        if r < 0.3: # Teleport
-            self.x = player.x + random.choice([-250, 250])
-            self.y = ground - self.height
-            self.current_action = 'teleport'
-            self.action_timer = 40
-        elif r < 0.7: # Shoot
-            self.current_action = 'shoot'
-            self.action_timer = 80
-        else: # Void Zone
-            self.void_zones.append([player.x - 50, ground - 10, 180])
-            self.current_action = 'void'
-            self.action_timer = 30
-            
-        if player.x < self.x + self.width and self.x < player.x + player.width and \
-           player.y < self.y + self.height and self.y < player.y + player.height:
-            player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
-
-    def draw(self, screen):
-        super().draw(screen)
-        for vz in self.void_zones:
-            pygame.draw.rect(screen, (50, 0, 50, 128), (vz[0], ground - 10, 100, 10))
-        if self.hp <= 0: return
-        # Draw HP Bar (Shared by all bosses)
-        bar_w = 400
-        bar_h = 20
-        pygame.draw.rect(screen, (50, 50, 50), (width // 2 - bar_w // 2, 20, bar_w, bar_h))
-        pygame.draw.rect(screen, (255, 0, 128), (width // 2 - bar_w // 2, 20, int(bar_w * (self.hp / self.max_hp)), bar_h))
-
-class SteelSentinelBoss(Enemy):
-    def __init__(self, x, y, hp=150, attack_damage=3):
-        super().__init__(x, y, hp, (192, 192, 192), 'boss', attack_damage)
-        self.width, self.height = 120, 120
-        self.action_timer = 0
-        self.current_action = None
-        self.charge_dir = 0
-
-    def _update_behavior(self, player):
-        if self.action_timer > 0:
-            self.action_timer -= 1
-            if self.current_action == 'charge':
-                self.vx = self.charge_dir * 15
-            elif self.current_action == 'missile' and self.action_timer % 10 == 0:
-                enemy_bullets.append(EnemyBullet(self.x + 60, self.y, -math.pi/2 - random.uniform(-0.5, 0.5), self.attack_damage))
-            return
-
-        r = random.random()
-        if r < 0.4: # Charge
-            self.current_action = 'charge'
-            self.charge_dir = 1 if player.x > self.x else -1
-            self.action_timer = 60
-        elif r < 0.8: # Missile
-            self.current_action = 'missile'
-            self.action_timer = 60
-        else: # Move
-            self.vx = (1 if player.x > self.x else -1) * 3
-            self.action_timer = 40
-            
-        if player.x < self.x + self.width and self.x < player.x + player.width and \
-           player.y < self.y + self.height and self.y < player.y + player.height:
-            player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
-
-    def draw(self, screen):
-        super().draw(screen)
-        if self.hp <= 0: return
-        bar_w = 400
-        bar_h = 20
-        pygame.draw.rect(screen, (50, 50, 50), (width // 2 - bar_w // 2, 20, bar_w, bar_h))
-        pygame.draw.rect(screen, (150, 150, 150), (width // 2 - bar_w // 2, 20, int(bar_w * (self.hp / self.max_hp)), bar_h))
-
-class FrostWyrmBoss(Enemy):
-    def __init__(self, x, y, hp=100, attack_damage=2):
-        super().__init__(x, y, hp, (135, 206, 250), 'boss', attack_damage)
-        self.width, self.height = 60, 60
-        self.action_timer = 0
-        self.current_action = None
-        self.time = 0
-
-    def _update_physics(self):
-        self.time += 0.05
-        self.x += self.vx
-        self.y = 150 + math.sin(self.time) * 100
-        self.vx *= 0.98
-        if self.x < 0: self.vx = 2
-        if self.x > width - 60: self.vx = -2
-
-    def _update_behavior(self, player):
-        if self.action_timer > 0:
-            self.action_timer -= 1
-            if self.current_action == 'breath' and self.action_timer % 10 == 0:
-                angle = math.atan2(player.y - self.y, player.x - self.x)
-                enemy_bullets.append(FrostEnemyBullet(self.x+30, self.y+30, angle, self.attack_damage))
-            return
-
-        r = random.random()
-        if r < 0.5: # Breath
-            self.current_action = 'breath'
-            self.action_timer = 60
-        else: # Swoop
-            self.vx = (1 if player.x > self.x else -1) * 8
-            self.action_timer = 60
-            
-        if player.x < self.x + self.width and self.x < player.x + player.width and \
-           player.y < self.y + self.height and self.y < player.y + player.height:
-            player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
-
-    def draw(self, screen):
-        # Draw tail
-        for i in range(1, 6):
-            tx = self.x - math.cos(self.time - i*0.5) * i * 30
-            ty = 150 + math.sin(self.time - i*0.5) * 100
-            pygame.draw.rect(screen, (100, 180, 255), (int(tx), int(ty), 40, 40))
-        super().draw(screen)
-        if self.hp <= 0: return
-        bar_w = 400
-        bar_h = 20
-        pygame.draw.rect(screen, (50, 50, 50), (width // 2 - bar_w // 2, 20, bar_w, bar_h))
-        pygame.draw.rect(screen, (0, 191, 255), (width // 2 - bar_w // 2, 20, int(bar_w * (self.hp / self.max_hp)), bar_h))
-
 player = Player()
 enemies = []
 enemy_bullets = []
@@ -4686,13 +4513,9 @@ def start_next_wave():
         boss_atk = 2 + (wave_number // 5 - 1)
         # Apply difficulty multiplier (Score Fever)
         diff_mult = getattr(player, 'difficulty_multiplier', 1.0)
-        # Apply difficulty multiplier (Score Fever)
-        diff_mult = getattr(player, 'difficulty_multiplier', 1.0)
         boss_hp = int(boss_hp * diff_mult)
         boss_atk = int(boss_atk * diff_mult)
-        
-        boss_class = random.choice([BlockGolemBoss, ShadowWeaverBoss, SteelSentinelBoss, FrostWyrmBoss])
-        enemies.append(boss_class(width // 2 - 50, ground - 100, hp=boss_hp, attack_damage=boss_atk))
+        enemies.append(BlockGolemBoss(width // 2 - 50, ground - 100, hp=boss_hp, attack_damage=boss_atk))
         return
 
     # Wave 1: 2 enemies. Increases by 1 every 2 waves, max 8
