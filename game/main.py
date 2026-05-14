@@ -4640,6 +4640,11 @@ def start_next_wave():
     wave_start_wait_timer = 60
     enemies = []
     enemy_bullets = [] # Clear previous wave bullets
+
+    # Suppression factor for high scores (> 1,000,000)
+    hp_suppression = 1.0
+    if player.score > 1000000:
+        hp_suppression = 1.0 / (1.0 + math.log10(player.score / 1000000))
     
     # Boss spawn restricted to Reincarnator mode
     is_reincarnMode = getattr(player.character, 'is_reincarnator_mode', False)
@@ -4650,7 +4655,7 @@ def start_next_wave():
         boss_atk = 2 + (wave_number // 5 - 1)
         # Apply difficulty multiplier (Score Fever)
         diff_mult = getattr(player, 'difficulty_multiplier', 1.0)
-        boss_hp = int(boss_hp * diff_mult)
+        boss_hp = int(boss_hp * diff_mult * hp_suppression)
         boss_atk = int(boss_atk * diff_mult)
         
         boss_class = random.choice([BlockGolemBoss, ShadowWeaverBoss, SteelSentinelBoss, FrostWyrmBoss])
@@ -4691,7 +4696,7 @@ def start_next_wave():
     
     # Apply difficulty multiplier (Score Fever)
     diff_mult = getattr(player, 'difficulty_multiplier', 1.0)
-    enemy_hp = int(enemy_hp * diff_mult)
+    enemy_hp = int(enemy_hp * diff_mult * hp_suppression)
     enemy_atk = max(1, int(enemy_atk * diff_mult))
     
     for i in range(num_enemies):
