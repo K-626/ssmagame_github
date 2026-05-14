@@ -3621,6 +3621,23 @@ class Player:
             amount = int(amount * getattr(self, 'damage_taken_multiplier', 1.0))
             amount = max(1, amount)  # At least 1 damage if not blocked by defense
             self.hp -= amount
+            
+            # Survival Skill protection: HP won't drop below 1 while active
+            survivor_active = False
+            check_skills = []
+            if self.character:
+                check_skills.extend(self.character.skills)
+            if hasattr(self, 'skills'):
+                check_skills.extend(self.skills)
+            
+            for s in check_skills:
+                if type(s).__name__ == "SurvivalSkill" and getattr(s, 'active_timer', 0) > 0:
+                    survivor_active = True
+                    break
+            
+            if survivor_active and self.hp < 1:
+                self.hp = 1
+
             self.hit_timer = 40
             self.vx = source_facing * 10 # Knockback
             self.wave_damage_taken = True
