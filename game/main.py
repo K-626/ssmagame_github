@@ -3267,7 +3267,7 @@ class Player:
         self.cooldown_speed_mult = 1.0
         self.jump_count_max = 2
         self.character = None
-        self.reincarnator_mode = False
+        # self.reincarnator_mode = False
         self.soul_sword_level = 0
         self.blood_sword_level = 0
         self.blood_sword_timer = 0
