@@ -942,8 +942,9 @@ class Character:
             'RisingStrikeSkill': 'Rising Strike', 'DashStrikeSkill': 'Dash Strike',
             'EnhancedFireSkill': 'Spread Fire', 'FireSkill': 'Fireball', 'IceSkill': 'Frost',
             'DashSkill': 'Dash', 'GravitySkill': 'Gravity',
-            'PounceSkill': 'Pounce', 'ScaleProjectileSkill': 'Scale Blade',
-            'RoarSkill': 'Roar', 'AmpuleSkill': 'Ampule', 'RampageSkill': 'Rampage',
+            'DragonStrikeSkill': 'Dragon Strike', 'SanctuarySkill': 'Sanctuary',
+            'LightArrowSkill': 'Light Arrow', 'DragonMeteorSkill': 'Dragon Meteor',
+            'GekirinSkill': 'Gekirin',
             'BlackHoleSkill': 'Black Hole', 'ElMinyaSkill': 'El Minya', 'DarkPulseSkill': 'Dark Pulse',
             'ShadowStepSkill': 'Shadow Step', 'AbyssRaySkill': 'Abyss Ray',
             'AutoCrossbowSkill': 'Crossbow', 'BearTrapSkill': 'Bear Trap', 'HawkStrikeSkill': 'Hawk Strike',
@@ -1014,8 +1015,8 @@ class Character:
             JavelinThrowSkill, VaultingStrikeSkill, RapidThrustsSkill, SweepingStrikeSkill, DragonDiveSkill,
             # Swordsman
             RisingStrikeSkill, DashStrikeSkill, FireSkill, GravitySkill, IceSkill, DashSkill,
-            # MonsterBeta
-            PounceSkill, ScaleProjectileSkill, RoarSkill, AmpuleSkill, RampageSkill, EnhancedFireSkill,
+            # Dragon Knight (MonsterBeta)
+            DragonStrikeSkill, SanctuarySkill, LightArrowSkill, DragonMeteorSkill, GekirinSkill, EnhancedFireSkill,
             # IceMage
             AlHumaSkill, IceBrandArtsSkill, BlizzardLanceSkill, IceShieldSkill, CocytusSkill,
             # DarkMage
@@ -1043,7 +1044,7 @@ class Character:
     def generate_boss_rewards(self):
         """Generates special rewards after boss defeat"""
         global wave_number
-        is_sword = any(type(self).__name__ == cls for cls in ["MagicSwordsman", "Warrior"]) or \
+        is_sword = any(type(self).__name__ == cls for cls in ["MagicSwordsman", "Warrior", "MonsterBeta"]) or \
                    any(type(s).__name__ == "IceBrandArtsSkill" for s in self.skills)
         is_spear = type(self).__name__ == "Lancer"
         is_hammer = type(self).__name__ == "Warrior"
@@ -1962,10 +1963,414 @@ class MagicSwordsman(Character):
 
 
 # [Translated/Cleaned Comment]
-class PredatorLeapSkill(Skill):
-    """Predator Leap: Targets nearest enemy and leaps toward them."""
+# """
+# # --- LEGACY MONSTER CLASSES (COMMENTED OUT) ---
+# class PredatorLeapSkill(Skill):
+#     """Predator Leap: Targets nearest enemy and leaps toward them."""
+#     def __init__(self, x, y):
+#         super().__init__(x, y, 120, (180, 80, 50), (90, 40, 25))
+#         self.leaping = 0
+#         self.leap_vx = 0
+#         self.leap_vy = 0
+#         self.hit_enemies = []
+#         self.player_ref = None
+#     def activate(self, player, enemies=None):
+#         if super().activate(player, enemies):
+#             target = None
+#             min_dist = float('inf')
+#             if enemies:
+#                 for e in enemies:
+#                     if e.hp > 0:
+#                         dist = math.hypot(e.x + e.width/2 - player.x, e.y + e.height/2 - player.y)
+#                         if dist < min_dist:
+#                             min_dist = dist
+#                             target = e
+#             if target:
+#                 dx = target.x + target.width/2 - (player.x + 20)
+#                 dy = target.y + target.height/2 - (player.y + 20)
+#                 d = max(1, math.hypot(dx, dy))
+#                 speed = 18
+#                 self.leap_vx = (dx/d) * speed
+#                 self.leap_vy = (dy/d) * speed
+#             else:
+#                 self.leap_vx = 15 * player.facing
+#                 self.leap_vy = -5
+#             self.leaping = 12
+#             self.hit_enemies = []
+#             self.player_ref = player
+#             player.invincible_timer = max(player.invincible_timer, 12)
+#             return True
+#         return False
+#     def update(self, enemies=None, cooldown_speed=1, player=None):
+#         super().update(enemies, cooldown_speed)
+#         if self.leaping > 0 and player:
+#             self.leaping -= 1
+#             player.x += self.leap_vx
+#             player.y += self.leap_vy
+#             player.invincible_timer = max(player.invincible_timer, 2)
+#             if player.x < 0: player.x = 0
+#             if player.x > width - player.width: player.x = width - player.width
+#             if player.y > ground - player.height: player.y = ground - player.height
+#             if enemies:
+#                 hit_rect = pygame.Rect(player.x - 10, player.y - 10, 60, 60)
+#                 for e in enemies:
+#                     if e.hp > 0 and e not in self.hit_enemies:
+#                         if hit_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+#                             dmg = int(5 * getattr(player, 'damage_multiplier', 1))
+#                             if e.take_damage(dmg, 1 if self.leap_vx > 0 else -1, knockback_x=8, knockback_y=-5):
+#                                 self.hit_enemies.append(e)
+#                                 if getattr(player, '_monster_rampage', 0) > 0:
+#                                     player.hp = min(player.max_hp, player.hp + 1)
+#     def draw_effect(self, screen):
+#         if self.leaping > 0 and self.player_ref:
+#             p = self.player_ref
+#             surf = pygame.Surface((60, 60), pygame.SRCALPHA)
+#             pygame.draw.ellipse(surf, (200, 80, 50, 100), (0, 0, 60, 60))
+#             screen.blit(surf, (int(p.x - 10), int(p.y - 10)))
+# 
+# class PounceSkill(Skill):
+#     """     :            HP  """
+#     def __init__(self, x, y):
+#         super().__init__(x, y, 90, (200, 50, 50), (100, 25, 25))
+#         self.dashing = 0
+#         self.dash_dir = 1
+#         self.hit_enemies = []
+#     def activate(self, player, enemies=None):
+#         if super().activate(player, enemies):
+#             self.dashing = 15
+#             self.dash_dir = player.facing
+#             self.hit_enemies = []
+#             player.vy = -8
+#             return True
+#         return False
+#     def update(self, enemies=None, cooldown_speed=1, player=None):
+#         super().update(enemies, cooldown_speed)
+#         if self.dashing > 0 and player:
+#             self.dashing -= 1
+#             player.x += 12 * self.dash_dir
+#             player.invincible_timer = max(player.invincible_timer, 2)
+#             if enemies:
+#                 hit_rect = pygame.Rect(player.x - 10, player.y - 10, 60, 60)
+#                 for e in enemies:
+#                     if e.hp > 0 and e not in self.hit_enemies:
+#                         if hit_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+#                             dmg = 3 * getattr(player, 'damage_multiplier', 1)
+#                             if e.take_damage(int(dmg), self.dash_dir, knockback_x=8, knockback_y=-5):
+#                                 self.hit_enemies.append(e)
+#                                 if getattr(player, '_monster_rampage', 0) > 0:
+#                                     # [Translated/Cleaned Comment]
+#                                     heal_amount = 1
+#                                     player.hp = min(player.max_hp, player.hp + heal_amount)
+#     def draw_effect(self, screen):
+#         pass
+# 
+# class ScaleProjectileSkill(Skill):
+#     """Scale Blade: Fires homing scale projectiles. Drain during rampage."""
+#     def __init__(self, x, y):
+#         super().__init__(x, y, 45, (150, 80, 80), (75, 40, 40))
+#         self.projectiles = []
+#     def activate(self, player, enemies=None):
+#         if super().activate(player, enemies):
+#             vx = 15 * player.facing
+#             pierce = getattr(player, '_monster_rampage', 0) > 0
+#             self.projectiles.append({
+#                 'x': player.x + 20, 'y': player.y + 15,
+#                 'vx': vx, 'vy': 0, 'timer': 60, 'facing': player.facing,
+#                 'pierce': pierce, 'hit': []
+#             })
+#             return True
+#         return False
+#     def update(self, enemies=None, cooldown_speed=1, player=None):
+#         super().update(enemies, cooldown_speed)
+#         dmg_mult = getattr(player, 'damage_multiplier', 1) if player else 1
+#         rampage = getattr(player, '_monster_rampage', 0) > 0 if player else False
+#         for p in self.projectiles[:]:
+#             # Homing toward nearest enemy
+#             if enemies:
+#                 target = None
+#                 min_dist = float('inf')
+#                 for e in enemies:
+#                     if e.hp > 0 and e not in p['hit']:
+#                         dist = math.hypot(e.x+e.width/2 - p['x'], e.y+e.height/2 - p['y'])
+#                         if dist < min_dist: min_dist = dist; target = e
+#                 if target:
+#                     dx = target.x + target.width/2 - p['x']
+#                     dy = target.y + target.height/2 - p['y']
+#                     d = max(1, math.hypot(dx, dy))
+#                     p['vx'] = (p['vx'] * 5 + (dx/d)*15) / 6
+#                     p['vy'] = (p['vy'] * 5 + (dy/d)*15) / 6
+#             p['x'] += p['vx']
+#             p['y'] += p['vy']
+#             p['timer'] -= 1
+#             if p['timer'] <= 0 or p['x'] < -50 or p['x'] > width + 50:
+#                 self.projectiles.remove(p)
+#                 continue
+#             if enemies:
+#                 proj_rect = pygame.Rect(p['x'] - 10, p['y'] - 5, 20, 10)
+#                 for e in enemies:
+#                     if e.hp > 0 and e not in p['hit']:
+#                         if proj_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+#                             e.take_damage(int(2 * dmg_mult), p['facing'])
+#                             p['hit'].append(e)
+#                             # Drain during rampage
+#                             if rampage and player:
+#                                 player.hp = min(player.max_hp, player.hp + 1)
+#                             if not p['pierce']:
+#                                 if p in self.projectiles: self.projectiles.remove(p)
+#                                 break
+#     def draw_effect(self, screen):
+#         for p in self.projectiles:
+#             color = (200, 100, 100) if not p['pierce'] else (255, 50, 50)
+#             px, py = int(p['x']), int(p['y'])
+#             d = 1 if p['vx'] > 0 else -1
+#             pygame.draw.polygon(screen, color, [
+#                 (px + 12 * d, py), (px - 8 * d, py - 6), (px - 8 * d, py + 6)
+#             ])
+# 
+# class RoarSkill(Skill):
+#     """  :        +      """
+#     def __init__(self, x, y):
+#         super().__init__(x, y, 180, (180, 130, 50), (90, 65, 25))
+#         self.roar_effect = 0
+#         self._player_ref = None
+#     def activate(self, player, enemies=None):
+#         if super().activate(player, enemies):
+#             self.roar_effect = 15
+#             self._player_ref = player
+#             if enemies:
+#                 cx = player.x + 20
+#                 cy = player.y + 20
+#                 for e in enemies:
+#                     if e.hp > 0:
+#                         dist = math.hypot(e.x + e.width//2 - cx, e.y + e.height//2 - cy)
+#                         if dist < 200:
+#                             e.frozen_timer = max(e.frozen_timer, 60)
+#                             e.take_damage(1, 1 if e.x > cx else -1, knockback_x=3, knockback_y=-2, status_effect=True)
+#             return True
+#         return False
+#     def update(self, enemies=None, cooldown_speed=1, player=None):
+#         super().update(enemies, cooldown_speed)
+#         if self.roar_effect > 0: self.roar_effect -= 1
+#     def draw_effect(self, screen):
+#         if self.roar_effect > 0 and self._player_ref:
+#             px = self._player_ref.x + 20
+#             py = self._player_ref.y + 20
+#             r = int((15 - self.roar_effect) / 15 * 200)
+#             alpha = int(self.roar_effect / 15 * 150)
+#             if r >= 4:
+#                 surf = pygame.Surface((r*2+2, r*2+2), pygame.SRCALPHA)
+#                 pygame.draw.circle(surf, (255, 200, 50, alpha), (r+1, r+1), r, 4)
+#                 screen.blit(surf, (int(px)-r-1, int(py)-r-1))
+# 
+# class AmpuleSkill(Skill):
+#     """      :    +       """
+#     def __init__(self, x, y):
+#         super().__init__(x, y, 120, (100, 200, 100), (50, 100, 50))
+#     def activate(self, player, enemies=None):
+#         # [Translated/Cleaned Comment]
+#         if player.hp <= 1:
+#             return False
+#             
+#         if super().activate(player, enemies):
+#             # [Translated/Cleaned Comment]
+#             self_dmg = max(1, player.max_hp // 10)
+#             
+#             player.hp -= self_dmg
+#             if player.hp < 1: player.hp = 1
+#             player._ampule_count = getattr(player, '_ampule_count', 0) + 1
+#             return True
+#         return False
+# 
+# class RampageSkill(Skill):
+#     """  :               """
+#     def __init__(self, x, y):
+#         super().__init__(x, y, 300, (200, 30, 30), (100, 15, 15))
+#         self.active_timer = 0
+#     def activate(self, player, enemies=None):
+#         if super().activate(player, enemies):
+#             amps = getattr(player, '_ampule_count', 0)
+#             
+#             # [Translated/Cleaned Comment]
+#             base_duration = 180
+#             duration_per_ampule = 30
+#             self.active_timer = base_duration + amps * duration_per_ampule
+#             self.initial_duration = self.active_timer
+#             
+#             player._monster_rampage = self.active_timer
+#             
+#             # [Translated/Cleaned Comment]
+#             player._ampule_count = amps // 2
+#             return True
+#         return False
+#     def update(self, enemies=None, cooldown_speed=1, player=None):
+#         super().update(enemies, cooldown_speed)
+#         if self.active_timer > 0:
+#             self.active_timer -= 1
+#             if player:
+#                 player._monster_rampage = self.active_timer
+#     def draw_effect(self, screen):
+#         pass
+# 
+# class MonsterBeta(Character):
+#     """
+#     Monster: Pounce-based melee with ampule stacking and rampage.
+#     """
+#     def __init__(self, player):
+#         super().__init__(player)
+#         self.skill_predator = PredatorLeapSkill(15, 15)
+#         self.skill_scale = ScaleProjectileSkill(75, 15)
+#         self.skill_roar = RoarSkill(135, 15)
+#         self.skill_ampule = AmpuleSkill(195, 15)
+#         self.skill_rampage = RampageSkill(255, 15)
+#         self.skills = [self.skill_predator, self.skill_scale, self.skill_roar, self.skill_ampule, self.skill_rampage]
+#         self.pounce_timer = 0
+#         self.pounce_dir = 1
+#         self.pounce_hit_enemies = []
+#         self.scratch_timer = 0
+#         self.hit_enemies = []
+#         player._ampule_count = 0
+#         player._monster_rampage = 0
+# 
+#     def get_max_hp(self): return 12
+#     def get_speed(self): return 1.5
+#     def get_jump_power(self): return -16
+# 
+#     def attack(self, enemies):
+#         # Pounce forward + scratch after
+#         if self.pounce_timer == 0 and self.scratch_timer == 0:
+#             self.pounce_timer = 10
+#             self.pounce_dir = self.player.facing
+#             self.pounce_hit_enemies = []
+# 
+#     def handle_event(self, event, enemies):
+#         super().handle_event(event, enemies)
+#         if event.type == pygame.KEYDOWN:
+#             if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
+#                 self.player.vy = self.player.jump_power
+#                 self.player.jumpcount -= 1
+#             if not self.is_reincarnator_mode:
+#                 if event.key == key_config['skill_1']:
+#                     self.skill_predator.activate(self.player, enemies)
+#                 if event.key == key_config['skill_2']:
+#                     self.skill_scale.activate(self.player, enemies)
+#                 if event.key == key_config['skill_3']:
+#                     self.skill_roar.activate(self.player, enemies)
+#                 if event.key == key_config['skill_4']:
+#                     self.skill_ampule.activate(self.player, enemies)
+#                 if event.key == key_config['skill_5']:
+#                     self.skill_rampage.activate(self.player, enemies)
+# 
+# 
+#     def update(self, keys, enemies, cooldown_speed):
+#         super().update(keys, enemies, cooldown_speed)
+#         amps = getattr(self.player, '_ampule_count', 0)
+#         rampage = getattr(self.player, '_monster_rampage', 0)
+#         
+#         self.player.damage_multiplier = 1.0 + amps * 1.1
+#         if rampage > 0:
+#             amp_bonus = amps * 0.3
+#             self.player.damage_multiplier += 1.0 + amp_bonus
+#             self.player.move_speed = 1.5 + 0.3 * min(amps, 5)
+#             self.player.jump_power = -16 - min(amps, 5)
+#         else:
+#             self.player.move_speed = 1.5
+#             self.player.jump_power = -16
+#         
+#         # Pounce phase (basic attack)
+#         if self.pounce_timer > 0:
+#             self.pounce_timer -= 1
+#             self.player.x += 10 * self.pounce_dir
+#             self.player.invincible_timer = max(self.player.invincible_timer, 2)
+#             if enemies:
+#                 hit_rect = pygame.Rect(self.player.x - 10, self.player.y - 10, 60, 60)
+#                 for e in enemies:
+#                     if e.hp > 0 and e not in self.pounce_hit_enemies:
+#                         if hit_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+#                             dmg = int(2 * self.player.damage_multiplier)
+#                             if e.take_damage(dmg, self.pounce_dir, knockback_x=6, knockback_y=-3):
+#                                 self.pounce_hit_enemies.append(e)
+#                                 if rampage > 0:
+#                                     self.player.hp = min(self.player.max_hp, self.player.hp + 1)
+#             if self.pounce_timer == 0:
+#                 # Start scratch after pounce
+#                 self.scratch_timer = 8
+#                 self.hit_enemies = []
+# 
+#         # Scratch phase (after pounce)
+#         if self.scratch_timer > 0:
+#             self.scratch_timer -= 1
+#             if self.scratch_timer < 5:
+#                 hx = self.player.x + (50 * self.player.facing)
+#                 hy = self.player.y + 15
+#                 if enemies:
+#                     claw_rect = pygame.Rect(hx - 25, hy - 20, 50, 40)
+#                     for e in enemies:
+#                         if e.hp > 0 and e not in self.hit_enemies:
+#                             if claw_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+#                                 dmg = int(2 * self.player.damage_multiplier)
+#                                 if e.take_damage(dmg, self.player.facing, knockback_x=4, knockback_y=-2):
+#                                     self.hit_enemies.append(e)
+# 
+#     def draw_effects(self, screen):
+#         super().draw_effects(screen)
+#         p = self.player
+#         rampage = getattr(p, '_monster_rampage', 0)
+#         amps = getattr(p, '_ampule_count', 0)
+#         
+#         if self.scratch_timer > 0 and self.scratch_timer < 5:
+#             cx = int(p.x + 50 * p.facing)
+#             cy = int(p.y + 15)
+#             for i in range(3):
+#                 offset = (i - 1) * 8
+#                 pygame.draw.line(screen, (255, 200, 200),
+#                     (cx - 15 * p.facing, cy + offset - 10),
+#                     (cx + 15 * p.facing, cy + offset + 10), 3)
+#         
+#         if rampage > 0:
+#             # [Translated/Cleaned Comment]
+#             shade = pygame.Surface((p.width, p.height), pygame.SRCALPHA)
+#             shade.fill((200, 0, 0, 120))
+#             screen.blit(shade, (int(p.x), int(p.y)))
+#             
+#             # [Translated/Cleaned Comment]
+#             eye_y = int(p.y + 12)
+#             eye_x = int(p.x + p.width/2 + 10 * p.facing)
+#             pygame.draw.circle(screen, (255, 0, 0), (eye_x, eye_y), 5)
+#             pygame.draw.circle(screen, (255, 255, 100), (eye_x, eye_y), 2)
+#             
+#             # [Translated/Cleaned Comment]
+#             pulse = abs(math.sin(pygame.time.get_ticks() * 0.015)) * 50
+#             aura_surf = pygame.Surface((100, 100), pygame.SRCALPHA)
+#             aura_color = (200 + int(pulse), 20, 20, 60 + int(pulse))
+#             pygame.draw.ellipse(aura_surf, aura_color, (0, 0, 100, 100))
+#             screen.blit(aura_surf, (int(p.x - 30), int(p.y - 30)))
+#         
+#         if amps > 0:
+#             # [Translated/Cleaned Comment]
+#             icon_w = 4
+#             icon_h = 10
+#             spacing = 2
+#             max_per_row = 10
+#             for i in range(amps):
+#                 row = i // max_per_row
+#                 col = i % max_per_row
+#                 num_in_this_row = min(amps - row * max_per_row, max_per_row)
+#                 total_w = num_in_this_row * icon_w + (num_in_this_row - 1) * spacing
+#                 start_x = int(p.x + p.width/2 - total_w/2)
+#                 start_y = int(p.y - 15 - row * (icon_h + 3))
+#                 
+#                 ix = start_x + col * (icon_w + spacing)
+#                 # Green ampule
+#                 pygame.draw.rect(screen, (50, 220, 50), (ix, start_y, icon_w, icon_h))
+#                 # Ampule cap (white)
+#                 pygame.draw.rect(screen, (255, 255, 255), (ix, start_y, icon_w, 2))
+# """
+
+# --- NEW DRAGON KNIGHT SKILLS & CHARACTER CLASS ---
+class DragonStrikeSkill(Skill):
+    """竜撃 (Dragon Strike)"""
     def __init__(self, x, y):
-        super().__init__(x, y, 120, (180, 80, 50), (90, 40, 25))
+        super().__init__(x, y, 90, (230, 50, 50), (115, 25, 25))
         self.leaping = 0
         self.leap_vx = 0
         self.leap_vy = 0
@@ -1973,6 +2378,7 @@ class PredatorLeapSkill(Skill):
         self.player_ref = None
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
+            player._monster_rampage = max(getattr(player, '_monster_rampage', 0), 20)
             target = None
             min_dist = float('inf')
             if enemies:
@@ -1996,6 +2402,7 @@ class PredatorLeapSkill(Skill):
             self.hit_enemies = []
             self.player_ref = player
             player.invincible_timer = max(player.invincible_timer, 12)
+            player.swording = 12
             return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
@@ -2016,187 +2423,218 @@ class PredatorLeapSkill(Skill):
                             dmg = int(5 * getattr(player, 'damage_multiplier', 1))
                             if e.take_damage(dmg, 1 if self.leap_vx > 0 else -1, knockback_x=8, knockback_y=-5):
                                 self.hit_enemies.append(e)
-                                if getattr(player, '_monster_rampage', 0) > 0:
-                                    player.hp = min(player.max_hp, player.hp + 1)
+                                player.hp = min(player.max_hp, player.hp + 1)
+            # Deactivate momentary Gekirin when leap finishes
+            if self.leaping == 0:
+                if getattr(player, '_monster_rampage', 0) <= 20:
+                    player._monster_rampage = 0
     def draw_effect(self, screen):
         if self.leaping > 0 and self.player_ref:
             p = self.player_ref
             surf = pygame.Surface((60, 60), pygame.SRCALPHA)
-            pygame.draw.ellipse(surf, (200, 80, 50, 100), (0, 0, 60, 60))
+            pygame.draw.ellipse(surf, (230, 50, 50, 120), (0, 0, 60, 60))
             screen.blit(surf, (int(p.x - 10), int(p.y - 10)))
 
-class PounceSkill(Skill):
-    """     :            HP  """
+class SanctuarySkill(Skill):
+    """サンクチュアリ (Sanctuary)"""
     def __init__(self, x, y):
-        super().__init__(x, y, 90, (200, 50, 50), (100, 25, 25))
-        self.dashing = 0
-        self.dash_dir = 1
-        self.hit_enemies = []
+        super().__init__(x, y, 600, (255, 215, 0), (128, 107, 0))
+        self.sanctuary_x = 0
+        self.sanctuary_y = 0
+        self.active_timer = 0
+        self.sanctuary_radius = 160
+        self.player_ref = None
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            self.dashing = 15
-            self.dash_dir = player.facing
-            self.hit_enemies = []
-            player.vy = -8
-            return True
-        return False
-    def update(self, enemies=None, cooldown_speed=1, player=None):
-        super().update(enemies, cooldown_speed)
-        if self.dashing > 0 and player:
-            self.dashing -= 1
-            player.x += 12 * self.dash_dir
-            player.invincible_timer = max(player.invincible_timer, 2)
+            self.sanctuary_x = player.x + 20
+            self.sanctuary_y = ground
+            self.active_timer = 300
+            self.player_ref = player
+            
+            rad = 220 if getattr(player, '_monster_rampage', 0) > 0 else 160
             if enemies:
-                hit_rect = pygame.Rect(player.x - 10, player.y - 10, 60, 60)
-                for e in enemies:
-                    if e.hp > 0 and e not in self.hit_enemies:
-                        if hit_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            dmg = 3 * getattr(player, 'damage_multiplier', 1)
-                            if e.take_damage(int(dmg), self.dash_dir, knockback_x=8, knockback_y=-5):
-                                self.hit_enemies.append(e)
-                                if getattr(player, '_monster_rampage', 0) > 0:
-                                    # [Translated/Cleaned Comment]
-                                    heal_amount = 1
-                                    player.hp = min(player.max_hp, player.hp + heal_amount)
-    def draw_effect(self, screen):
-        pass
-
-class ScaleProjectileSkill(Skill):
-    """Scale Blade: Fires homing scale projectiles. Drain during rampage."""
-    def __init__(self, x, y):
-        super().__init__(x, y, 45, (150, 80, 80), (75, 40, 40))
-        self.projectiles = []
-    def activate(self, player, enemies=None):
-        if super().activate(player, enemies):
-            vx = 15 * player.facing
-            pierce = getattr(player, '_monster_rampage', 0) > 0
-            self.projectiles.append({
-                'x': player.x + 20, 'y': player.y + 15,
-                'vx': vx, 'vy': 0, 'timer': 60, 'facing': player.facing,
-                'pierce': pierce, 'hit': []
-            })
-            return True
-        return False
-    def update(self, enemies=None, cooldown_speed=1, player=None):
-        super().update(enemies, cooldown_speed)
-        dmg_mult = getattr(player, 'damage_multiplier', 1) if player else 1
-        rampage = getattr(player, '_monster_rampage', 0) > 0 if player else False
-        for p in self.projectiles[:]:
-            # Homing toward nearest enemy
-            if enemies:
-                target = None
-                min_dist = float('inf')
-                for e in enemies:
-                    if e.hp > 0 and e not in p['hit']:
-                        dist = math.hypot(e.x+e.width/2 - p['x'], e.y+e.height/2 - p['y'])
-                        if dist < min_dist: min_dist = dist; target = e
-                if target:
-                    dx = target.x + target.width/2 - p['x']
-                    dy = target.y + target.height/2 - p['y']
-                    d = max(1, math.hypot(dx, dy))
-                    p['vx'] = (p['vx'] * 5 + (dx/d)*15) / 6
-                    p['vy'] = (p['vy'] * 5 + (dy/d)*15) / 6
-            p['x'] += p['vx']
-            p['y'] += p['vy']
-            p['timer'] -= 1
-            if p['timer'] <= 0 or p['x'] < -50 or p['x'] > width + 50:
-                self.projectiles.remove(p)
-                continue
-            if enemies:
-                proj_rect = pygame.Rect(p['x'] - 10, p['y'] - 5, 20, 10)
-                for e in enemies:
-                    if e.hp > 0 and e not in p['hit']:
-                        if proj_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            e.take_damage(int(2 * dmg_mult), p['facing'])
-                            p['hit'].append(e)
-                            # Drain during rampage
-                            if rampage and player:
-                                player.hp = min(player.max_hp, player.hp + 1)
-                            if not p['pierce']:
-                                if p in self.projectiles: self.projectiles.remove(p)
-                                break
-    def draw_effect(self, screen):
-        for p in self.projectiles:
-            color = (200, 100, 100) if not p['pierce'] else (255, 50, 50)
-            px, py = int(p['x']), int(p['y'])
-            d = 1 if p['vx'] > 0 else -1
-            pygame.draw.polygon(screen, color, [
-                (px + 12 * d, py), (px - 8 * d, py - 6), (px - 8 * d, py + 6)
-            ])
-
-class RoarSkill(Skill):
-    """  :        +      """
-    def __init__(self, x, y):
-        super().__init__(x, y, 180, (180, 130, 50), (90, 65, 25))
-        self.roar_effect = 0
-        self._player_ref = None
-    def activate(self, player, enemies=None):
-        if super().activate(player, enemies):
-            self.roar_effect = 15
-            self._player_ref = player
-            if enemies:
-                cx = player.x + 20
-                cy = player.y + 20
                 for e in enemies:
                     if e.hp > 0:
-                        dist = math.hypot(e.x + e.width//2 - cx, e.y + e.height//2 - cy)
-                        if dist < 200:
-                            e.frozen_timer = max(e.frozen_timer, 60)
-                            e.take_damage(1, 1 if e.x > cx else -1, knockback_x=3, knockback_y=-2, status_effect=True)
+                        dist = math.hypot((e.x + e.width/2) - self.sanctuary_x, (e.y + e.height/2) - self.sanctuary_y)
+                        if dist < rad:
+                            e.frozen_timer = max(e.frozen_timer, 180)
             return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
-        if self.roar_effect > 0: self.roar_effect -= 1
+        if self.active_timer > 0:
+            self.active_timer -= 1
+            rad = 220 if (player and getattr(player, '_monster_rampage', 0) > 0) else 160
+            
+            global enemy_bullets
+            for b in enemy_bullets[:]:
+                dist = math.hypot(b.x - self.sanctuary_x, b.y - self.sanctuary_y)
+                if dist < rad:
+                    if b in enemy_bullets:
+                        enemy_bullets.remove(b)
+            
+            if enemies:
+                for e in enemies:
+                    if e.hp > 0 and e.frozen_timer <= 0:
+                        dist = math.hypot((e.x + e.width/2) - self.sanctuary_x, (e.y + e.height/2) - self.sanctuary_y)
+                        if dist < rad:
+                            dx = (e.x + e.width/2) - self.sanctuary_x
+                            dy = (e.y + e.height/2) - self.sanctuary_y
+                            if dist > 0:
+                                e.x = self.sanctuary_x + (dx / dist) * rad - e.width/2
+                                e.vx = (dx / dist) * 2
+                            if player and getattr(player, '_monster_rampage', 0) > 0:
+                                if pygame.time.get_ticks() % 15 == 0:
+                                    e.take_damage(1, 1 if dx > 0 else -1, knockback_x=0, knockback_y=0)
     def draw_effect(self, screen):
-        if self.roar_effect > 0 and self._player_ref:
-            px = self._player_ref.x + 20
-            py = self._player_ref.y + 20
-            r = int((15 - self.roar_effect) / 15 * 200)
-            alpha = int(self.roar_effect / 15 * 150)
-            if r >= 4:
-                surf = pygame.Surface((r*2+2, r*2+2), pygame.SRCALPHA)
-                pygame.draw.circle(surf, (255, 200, 50, alpha), (r+1, r+1), r, 4)
-                screen.blit(surf, (int(px)-r-1, int(py)-r-1))
+        if self.active_timer > 0:
+            rad = 220 if (self.player_ref and getattr(self.player_ref, '_monster_rampage', 0) > 0) else 160
+            surf = pygame.Surface((rad*2+2, rad*2+2), pygame.SRCALPHA)
+            alpha = min(80, int(self.active_timer * 1.5))
+            pygame.draw.circle(surf, (255, 223, 0, alpha), (rad+1, rad+1), rad)
+            pygame.draw.circle(surf, (255, 215, 0, min(255, alpha + 60)), (rad+1, rad+1), rad, 4)
+            screen.blit(surf, (int(self.sanctuary_x) - rad - 1, int(self.sanctuary_y) - rad - 1))
 
-class AmpuleSkill(Skill):
-    """      :    +       """
+class LightArrowSkill(Skill):
+    """光の矢 (Light Arrow)"""
     def __init__(self, x, y):
-        super().__init__(x, y, 120, (100, 200, 100), (50, 100, 50))
+        super().__init__(x, y, 240, (255, 255, 150), (128, 128, 75))
+        self.arrows = []
     def activate(self, player, enemies=None):
-        # [Translated/Cleaned Comment]
-        if player.hp <= 1:
-            return False
-            
         if super().activate(player, enemies):
-            # [Translated/Cleaned Comment]
-            self_dmg = max(1, player.max_hp // 10)
-            
-            player.hp -= self_dmg
-            if player.hp < 1: player.hp = 1
-            player._ampule_count = getattr(player, '_ampule_count', 0) + 1
+            count = 18 if getattr(player, '_monster_rampage', 0) > 0 else 12
+            for _ in range(count):
+                angle = random.uniform(0, math.pi * 2)
+                dist = random.uniform(30, 60)
+                ax = player.x + 20 + math.cos(angle) * dist
+                ay = player.y + 20 + math.sin(angle) * dist
+                self.arrows.append([ax, ay, 0, 0, 0, 40, None, []])
             return True
         return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        new_arrows = []
+        rampage = getattr(player, '_monster_rampage', 0) > 0 if player else False
+        dmg_mult = getattr(player, 'damage_multiplier', 1) if player else 1
+        
+        for a in self.arrows:
+            if a[4] == 0:
+                a[5] -= 1
+                a[1] += math.sin(pygame.time.get_ticks() * 0.005 + a[0]) * 0.5
+                if a[5] <= 0:
+                    a[4] = 1
+                    alive = [e for e in enemies if e.hp > 0] if enemies else []
+                    if alive: a[6] = random.choice(alive)
+                    else:
+                        a[2] = random.choice([-15, 15])
+                        a[3] = random.uniform(-5, 5)
+            elif a[4] == 1:
+                if a[6] and a[6].hp > 0:
+                    dx = a[6].x + a[6].width/2 - a[0]
+                    dy = a[6].y + a[6].height/2 - a[1]
+                    d = max(1, math.hypot(dx, dy))
+                    a[2] = (dx / d) * 25
+                    a[3] = (dy / d) * 25
+                a[0] += a[2]
+                a[1] += a[3]
+                
+            hit = False
+            if enemies and a[4] == 1:
+                for e in enemies:
+                    if e.hp > 0 and e.x < a[0] < e.x + e.width and e.y < a[1] < e.y + e.height:
+                        if rampage:
+                            if e not in a[7]:
+                                e.take_damage(int((2 + self.damage_bonus) * dmg_mult), 1 if a[2] > 0 else -1, element='lightning', ignore_iframes=True)
+                                a[7].append(e)
+                        else:
+                            e.take_damage(int((2 + self.damage_bonus) * dmg_mult), 1 if a[2] > 0 else -1, element='lightning', ignore_iframes=True)
+                            hit = True
+                            break
+            if not hit and -100 < a[0] < width + 100 and -100 < a[1] < height + 100:
+                new_arrows.append(a)
+        self.arrows = new_arrows
+    def draw_effect(self, screen):
+        for a in self.arrows:
+            ax, ay = int(a[0]), int(a[1])
+            vx, vy = a[2], a[3]
+            angle = math.atan2(vy, vx) if (vx != 0 or vy != 0) else 0
+            arrow_len = 15
+            ex = ax - math.cos(angle) * arrow_len
+            ey = ay - math.sin(angle) * arrow_len
+            pygame.draw.line(screen, (255, 230, 100), (ax, ay), (int(ex), int(ey)), 3)
+            pygame.draw.circle(screen, (255, 255, 255), (ax, ay), 2)
 
-class RampageSkill(Skill):
-    """  :               """
+class DragonMeteorSkill(Skill):
+    """竜星群 (Dragon Meteor)"""
     def __init__(self, x, y):
-        super().__init__(x, y, 300, (200, 30, 30), (100, 15, 15))
+        super().__init__(x, y, 480, (255, 69, 0), (128, 34, 0))
+        self.meteors = []
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            count = 22 if getattr(player, '_monster_rampage', 0) > 0 else 15
+            for _ in range(count):
+                mx = random.randint(50, width - 50)
+                my = random.randint(-150, -50)
+                vx = random.uniform(-3, 3)
+                vy = random.uniform(10, 14)
+                radius = random.randint(8, 15)
+                self.meteors.append([mx, my, vx, vy, radius, 0, []])
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        new_meteors = []
+        rampage = getattr(player, '_monster_rampage', 0) > 0 if player else False
+        dmg_mult = getattr(player, 'damage_multiplier', 1) if player else 1
+        
+        for m in self.meteors:
+            if m[5] == 0:
+                m[0] += m[2]
+                m[1] += m[3]
+                if m[1] >= ground - m[4]:
+                    m[5] = 20
+                    if enemies:
+                        for e in enemies:
+                            if e.hp > 0:
+                                dist = math.hypot(e.x + e.width/2 - m[0], e.y + e.height/2 - ground)
+                                if dist < 80:
+                                    e.take_damage(int((4 + self.damage_bonus) * dmg_mult), 1 if e.x > m[0] else -1, knockback_x=5, knockback_y=-3)
+                                    if rampage:
+                                        e.burn_timer = max(e.burn_timer, 180)
+                new_meteors.append(m)
+            else:
+                m[5] -= 1
+                if m[5] > 0:
+                    new_meteors.append(m)
+        self.meteors = new_meteors
+    def draw_effect(self, screen):
+        for m in self.meteors:
+            if m[5] == 0:
+                mx, my = int(m[0]), int(m[1])
+                rad = int(m[4])
+                pygame.draw.line(screen, (255, 69, 0), (mx, my), (int(mx - m[2]*2), int(my - m[3]*2)), rad)
+                pygame.draw.circle(screen, (255, 140, 0), (mx, my), rad)
+                pygame.draw.circle(screen, (255, 255, 100), (mx, my), max(1, rad // 2))
+            else:
+                radius = int((20 - m[5]) * 4)
+                alpha = int((m[5] / 20) * 180)
+                surf = pygame.Surface((radius*2+2, radius*2+2), pygame.SRCALPHA)
+                pygame.draw.circle(surf, (255, 69, 0, alpha), (radius+1, radius+1), radius)
+                pygame.draw.circle(surf, (255, 200, 50, alpha), (radius+1, radius+1), max(1, radius - 10))
+                screen.blit(surf, (int(m[0]) - radius - 1, ground - radius - 1))
+
+class GekirinSkill(Skill):
+    """逆鱗 (Gekirin)"""
+    def __init__(self, x, y):
+        super().__init__(x, y, 600, (200, 30, 30), (100, 15, 15))
         self.active_timer = 0
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            amps = getattr(player, '_ampule_count', 0)
-            
-            # [Translated/Cleaned Comment]
-            base_duration = 180
-            duration_per_ampule = 30
-            self.active_timer = base_duration + amps * duration_per_ampule
-            self.initial_duration = self.active_timer
-            
-            player._monster_rampage = self.active_timer
-            
-            # [Translated/Cleaned Comment]
-            player._ampule_count = amps // 2
+            self.active_timer = 300
+            self.initial_duration = 300
+            player._monster_rampage = 300
+            if hasattr(player, 'score_popups'):
+                player.score_popups.append([player.x - 10, player.y - 35, "DRAGON MODE!", 60, (255, 50, 50)])
             return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
@@ -2210,22 +2648,16 @@ class RampageSkill(Skill):
 
 class MonsterBeta(Character):
     """
-    Monster: Pounce-based melee with ampule stacking and rampage.
+    竜騎士 (Dragon Knight): Melee attacks with Gekirin wrath, defensive Sanctuary, homing Light Arrows, and falling Dragon Meteors.
     """
     def __init__(self, player):
         super().__init__(player)
-        self.skill_predator = PredatorLeapSkill(15, 15)
-        self.skill_scale = ScaleProjectileSkill(75, 15)
-        self.skill_roar = RoarSkill(135, 15)
-        self.skill_ampule = AmpuleSkill(195, 15)
-        self.skill_rampage = RampageSkill(255, 15)
+        self.skill_predator = DragonStrikeSkill(15, 15)
+        self.skill_scale = SanctuarySkill(75, 15)
+        self.skill_roar = LightArrowSkill(135, 15)
+        self.skill_ampule = DragonMeteorSkill(195, 15)
+        self.skill_rampage = GekirinSkill(255, 15)
         self.skills = [self.skill_predator, self.skill_scale, self.skill_roar, self.skill_ampule, self.skill_rampage]
-        self.pounce_timer = 0
-        self.pounce_dir = 1
-        self.pounce_hit_enemies = []
-        self.scratch_timer = 0
-        self.hit_enemies = []
-        player._ampule_count = 0
         player._monster_rampage = 0
 
     def get_max_hp(self): return 12
@@ -2233,11 +2665,8 @@ class MonsterBeta(Character):
     def get_jump_power(self): return -16
 
     def attack(self, enemies):
-        # Pounce forward + scratch after
-        if self.pounce_timer == 0 and self.scratch_timer == 0:
-            self.pounce_timer = 10
-            self.pounce_dir = self.player.facing
-            self.pounce_hit_enemies = []
+        # Basic attack: 竜剣 (Dragon Sword) slash!
+        self.player.swording = 12
 
     def handle_event(self, event, enemies):
         super().handle_event(event, enemies)
@@ -2257,110 +2686,44 @@ class MonsterBeta(Character):
                 if event.key == key_config['skill_5']:
                     self.skill_rampage.activate(self.player, enemies)
 
+    def on_sword_hit(self, enemy, source_facing, damage):
+        super().on_sword_hit(enemy, source_facing, damage)
+        if getattr(self.player, '_monster_rampage', 0) > 0:
+            self.player.hp = min(self.player.max_hp, self.player.hp + 1)
 
     def update(self, keys, enemies, cooldown_speed):
         super().update(keys, enemies, cooldown_speed)
-        amps = getattr(self.player, '_ampule_count', 0)
         rampage = getattr(self.player, '_monster_rampage', 0)
         
-        self.player.damage_multiplier = 1.0 + amps * 1.1
         if rampage > 0:
-            amp_bonus = amps * 0.3
-            self.player.damage_multiplier += 1.0 + amp_bonus
-            self.player.move_speed = 1.5 + 0.3 * min(amps, 5)
-            self.player.jump_power = -16 - min(amps, 5)
+            self.player.damage_multiplier = 2.0
+            self.player.move_speed = 2.0
+            self.player.jump_power = -18
         else:
+            self.player.damage_multiplier = 1.0
             self.player.move_speed = 1.5
             self.player.jump_power = -16
-        
-        # Pounce phase (basic attack)
-        if self.pounce_timer > 0:
-            self.pounce_timer -= 1
-            self.player.x += 10 * self.pounce_dir
-            self.player.invincible_timer = max(self.player.invincible_timer, 2)
-            if enemies:
-                hit_rect = pygame.Rect(self.player.x - 10, self.player.y - 10, 60, 60)
-                for e in enemies:
-                    if e.hp > 0 and e not in self.pounce_hit_enemies:
-                        if hit_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            dmg = int(2 * self.player.damage_multiplier)
-                            if e.take_damage(dmg, self.pounce_dir, knockback_x=6, knockback_y=-3):
-                                self.pounce_hit_enemies.append(e)
-                                if rampage > 0:
-                                    self.player.hp = min(self.player.max_hp, self.player.hp + 1)
-            if self.pounce_timer == 0:
-                # Start scratch after pounce
-                self.scratch_timer = 8
-                self.hit_enemies = []
-
-        # Scratch phase (after pounce)
-        if self.scratch_timer > 0:
-            self.scratch_timer -= 1
-            if self.scratch_timer < 5:
-                hx = self.player.x + (50 * self.player.facing)
-                hy = self.player.y + 15
-                if enemies:
-                    claw_rect = pygame.Rect(hx - 25, hy - 20, 50, 40)
-                    for e in enemies:
-                        if e.hp > 0 and e not in self.hit_enemies:
-                            if claw_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                                dmg = int(2 * self.player.damage_multiplier)
-                                if e.take_damage(dmg, self.player.facing, knockback_x=4, knockback_y=-2):
-                                    self.hit_enemies.append(e)
 
     def draw_effects(self, screen):
         super().draw_effects(screen)
         p = self.player
         rampage = getattr(p, '_monster_rampage', 0)
-        amps = getattr(p, '_ampule_count', 0)
-        
-        if self.scratch_timer > 0 and self.scratch_timer < 5:
-            cx = int(p.x + 50 * p.facing)
-            cy = int(p.y + 15)
-            for i in range(3):
-                offset = (i - 1) * 8
-                pygame.draw.line(screen, (255, 200, 200),
-                    (cx - 15 * p.facing, cy + offset - 10),
-                    (cx + 15 * p.facing, cy + offset + 10), 3)
         
         if rampage > 0:
-            # [Translated/Cleaned Comment]
             shade = pygame.Surface((p.width, p.height), pygame.SRCALPHA)
             shade.fill((200, 0, 0, 120))
             screen.blit(shade, (int(p.x), int(p.y)))
             
-            # [Translated/Cleaned Comment]
             eye_y = int(p.y + 12)
             eye_x = int(p.x + p.width/2 + 10 * p.facing)
             pygame.draw.circle(screen, (255, 0, 0), (eye_x, eye_y), 5)
             pygame.draw.circle(screen, (255, 255, 100), (eye_x, eye_y), 2)
             
-            # [Translated/Cleaned Comment]
             pulse = abs(math.sin(pygame.time.get_ticks() * 0.015)) * 50
             aura_surf = pygame.Surface((100, 100), pygame.SRCALPHA)
             aura_color = (200 + int(pulse), 20, 20, 60 + int(pulse))
             pygame.draw.ellipse(aura_surf, aura_color, (0, 0, 100, 100))
             screen.blit(aura_surf, (int(p.x - 30), int(p.y - 30)))
-        
-        if amps > 0:
-            # [Translated/Cleaned Comment]
-            icon_w = 4
-            icon_h = 10
-            spacing = 2
-            max_per_row = 10
-            for i in range(amps):
-                row = i // max_per_row
-                col = i % max_per_row
-                num_in_this_row = min(amps - row * max_per_row, max_per_row)
-                total_w = num_in_this_row * icon_w + (num_in_this_row - 1) * spacing
-                start_x = int(p.x + p.width/2 - total_w/2)
-                start_y = int(p.y - 15 - row * (icon_h + 3))
-                
-                ix = start_x + col * (icon_w + spacing)
-                # Green ampule
-                pygame.draw.rect(screen, (50, 220, 50), (ix, start_y, icon_w, icon_h))
-                # Ampule cap (white)
-                pygame.draw.rect(screen, (255, 255, 255), (ix, start_y, icon_w, 2))
 
 class AlHumaSkill(Skill):
     def __init__(self, x, y):
@@ -3592,6 +3955,10 @@ class Player:
         if self.hit_timer > 0: self.hit_timer -= 1
         if self.invincible_timer > 0: self.invincible_timer -= 1
         if self.attack_cooldown > 0: self.attack_cooldown -= 1
+        
+        # Gekirin rampage timer decrement
+        if getattr(self, '_monster_rampage', 0) > 0:
+            self._monster_rampage -= 1
 
         # Blood Sword timer
         if self.blood_sword_timer > 0:
@@ -3648,7 +4015,7 @@ class Player:
                 new_reb_exp.append(exp)
         self._rebirth_explosions = new_reb_exp
 
-    def take_damage(self, amount, source_facing=1):
+    def take_damage(self, amount, source_facing=1, is_blood_sword_applicable=False):
         # Shadow state reactive counter
         if getattr(self, '_shadow_state', False) and getattr(self, '_shadow_skill_ref', None):
             self._shadow_skill_ref.trigger_counter(self)
@@ -4293,13 +4660,16 @@ class ShieldEnemy(Enemy):
            player.y < self.y + self.height and self.y < player.y + player.height:
             player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
 
-    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None, ignore_iframes=False):
+    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3,
+                    status_effect=False, element=None, ignore_iframes=False,
+                    is_blood_sword_applicable=False):
         # Halve damage if attacking from the front (facing direction)
         if not status_effect and source_facing == self.facing:
-
             damage = max(1, damage // 2)
             knockback_x = max(1, knockback_x // 2)
-        return super().take_damage(damage, source_facing, knockback_x, knockback_y, status_effect, element, ignore_iframes)
+        return super().take_damage(damage, source_facing, knockback_x, knockback_y,
+                                   status_effect, element, ignore_iframes,
+                                   is_blood_sword_applicable)
 
     def draw(self, screen):
         super().draw(screen)
@@ -4727,11 +5097,11 @@ class BlockGolemBoss(Enemy):
            player.y < self.y + self.height and self.y < player.y + player.height:
             player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
 
-    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None, ignore_iframes=False):
+    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None, ignore_iframes=False, is_blood_sword_applicable=False):
         if self.shield_timer > 0:
             damage = max(1, damage // 5) # [Translated/Cleaned Comment]
         # Boss is resistant to knockback
-        return super().take_damage(damage, source_facing, knockback_x * 0.2, knockback_y * 0.2, status_effect, element, ignore_iframes)
+        return super().take_damage(damage, source_facing, knockback_x * 0.2, knockback_y * 0.2, status_effect, element, ignore_iframes, is_blood_sword_applicable)
 
     def draw(self, screen):
         if self.hp <= 0:
@@ -4957,10 +5327,10 @@ class CrystalGuardianBoss(Enemy):
         if player.x < self.x + self.width and self.x < player.x + player.width and \
            player.y < self.y + self.height and self.y < player.y + player.height:
             player.take_damage(self.attack_damage, 1 if self.x < player.x else -1)
-    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None, ignore_iframes=False):
+    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3, status_effect=False, element=None, ignore_iframes=False, is_blood_sword_applicable=False):
         if self.shield_timer > 0:
             damage = max(1, damage // 5)
-        return super().take_damage(damage, source_facing, knockback_x * 0.2, knockback_y * 0.2, status_effect, element, ignore_iframes)
+        return super().take_damage(damage, source_facing, knockback_x * 0.2, knockback_y * 0.2, status_effect, element, ignore_iframes, is_blood_sword_applicable)
     def draw(self, screen):
         if self.hp <= 0:
             super().draw(screen)
@@ -5797,7 +6167,7 @@ async def main():
                 {"name": "Warrior", "color": (150, 100, 20), "skills": "J:HammerThrow K:SuperArmor\nL:Energy N:Earthquake\nM:WarCry"},
                 {"name": "Pyromancer", "color": (200, 50, 0), "skills": "J:Lava K:SpreadFire\nL:Eruption N:FlameDash\nM:Meteor"},
                 {"name": "Lancer", "color": (50, 150, 150), "skills": "J:Javelin K:VaultStrike\nL:RapidThrust N:Sweep\nM:DragonDive"},
-                {"name": "MonsterBeta", "color": (120, 30, 30), "skills": "J:Pounce K:ScaleShot\nL:Roar N:Ampule\nM:Rampage"},
+                {"name": "Dragon Knight", "color": (180, 40, 40), "skills": "J:Dragon Strike K:Sanctuary\nL:Light Arrow N:Dragon Meteor\nM:Gekirin"},
                 {"name": "IceMage", "color": (100, 200, 255), "skills": "J:AlHuma K:IceBrand\nL:Lance N:Shield\nM:Cocytus"}
             ]
         
