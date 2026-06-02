@@ -945,6 +945,8 @@ class Character:
             'DragonStrikeSkill': 'Dragon Strike', 'SanctuarySkill': 'Sanctuary',
             'LightArrowSkill': 'Light Arrow', 'DragonMeteorSkill': 'Dragon Meteor',
             'GekirinSkill': 'Gekirin',
+            'FairySummonSkill': 'Summon', 'FairyPoisonSkill': 'Poison', 'FairyGardenSkill': 'Garden',
+            'FairyWrathSkill': 'Wrath', 'FairyCharmSkill': 'Charm',
             'BlackHoleSkill': 'Black Hole', 'ElMinyaSkill': 'El Minya', 'DarkPulseSkill': 'Dark Pulse',
             'ShadowStepSkill': 'Shadow Step', 'AbyssRaySkill': 'Abyss Ray',
             'AutoCrossbowSkill': 'Crossbow', 'BearTrapSkill': 'Bear Trap', 'HawkStrikeSkill': 'Hawk Strike',
@@ -1017,6 +1019,7 @@ class Character:
             RisingStrikeSkill, DashStrikeSkill, FireSkill, GravitySkill, IceSkill, DashSkill,
             # Dragon Knight (MonsterBeta)
             DragonStrikeSkill, SanctuarySkill, LightArrowSkill, DragonMeteorSkill, GekirinSkill, EnhancedFireSkill,
+            FairySummonSkill, FairyPoisonSkill, FairyGardenSkill, FairyWrathSkill, FairyCharmSkill,
             # IceMage
             AlHumaSkill, IceBrandArtsSkill, BlizzardLanceSkill, IceShieldSkill, CocytusSkill,
             # DarkMage
@@ -1035,15 +1038,18 @@ class Character:
             has_survivor = SurvivalSkill in my_skill_types
             has_super_armor = SuperArmorSkill in my_skill_types
             has_sanctuary = SanctuarySkill in my_skill_types
+            has_shadowstep = ShadowStepSkill in my_skill_types
             
-            if has_survivor or has_super_armor or has_sanctuary:
-                # If any one of these three is held, remove the other two from unacquired
+            if has_survivor or has_super_armor or has_sanctuary or has_shadowstep:
+                # If any one of these invincibility-type skills is held, remove the others from unacquired
                 if has_survivor:
-                    unacquired = [s for s in unacquired if s not in [SuperArmorSkill, SanctuarySkill]]
+                    unacquired = [s for s in unacquired if s not in [SuperArmorSkill, SanctuarySkill, ShadowStepSkill]]
                 elif has_super_armor:
-                    unacquired = [s for s in unacquired if s not in [SurvivalSkill, SanctuarySkill]]
+                    unacquired = [s for s in unacquired if s not in [SurvivalSkill, SanctuarySkill, ShadowStepSkill]]
                 elif has_sanctuary:
-                    unacquired = [s for s in unacquired if s not in [SurvivalSkill, SuperArmorSkill]]
+                    unacquired = [s for s in unacquired if s not in [SurvivalSkill, SuperArmorSkill, ShadowStepSkill]]
+                elif has_shadowstep:
+                    unacquired = [s for s in unacquired if s not in [SurvivalSkill, SuperArmorSkill, SanctuarySkill]]
         
         random.shuffle(unacquired)
         
@@ -1713,6 +1719,7 @@ class DragonDiveSkill(Skill):
             pygame.draw.circle(screen, (100, 255, 255), (int(self.player_ref.x+20), int(self.player_ref.y+20)), 25)
             pygame.draw.polygon(screen, (50, 200, 200), [(self.player_ref.x+20, self.player_ref.y-20), (self.player_ref.x+50, self.player_ref.y+50), (self.player_ref.x-10, self.player_ref.y+50)])
 
+'''
 class Lancer(Character):
     """Lancer: Mid-range powerful thrust attacks and mobility-focused skills"""
     def __init__(self, player):
@@ -1804,6 +1811,333 @@ class Lancer(Character):
                 flash_surf = pygame.Surface((60, 20), pygame.SRCALPHA)
                 pygame.draw.ellipse(flash_surf, (255, 255, 255, 180), (0, 0, 60, 20))
                 screen.blit(flash_surf, (px + (reach - 30) * self.player.facing if self.player.facing == 1 else px - reach - 30, py - 10))
+'''
+
+class FairySummonSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 900, (180, 255, 220), (100, 180, 255))
+        self.summons = []
+        self.bullets = []
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            if len(self.summons) >= 5:
+                self.summons.pop(0)
+            self.summons.append({
+                'x': player.x + 20,
+                'y': ground - 40,
+                'vx': 0,
+                'facing': player.facing,
+                'attack_cooldown': 60,
+                'hp': 6,
+                'max_hp': 6,
+            })
+            self.player_ref = player
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        alive_enemies = [e for e in enemies if e.hp > 0] if enemies else []
+        new_summons = []
+        for s in self.summons:
+            if s['hp'] <= 0:
+                continue
+            if alive_enemies:
+                target = min(alive_enemies, key=lambda e: math.hypot((e.x + e.width/2) - s['x'], (e.y + e.height/2) - s['y']))
+                dist = math.hypot((target.x + target.width/2) - s['x'], (target.y + target.height/2) - s['y'])
+                if dist < 220 and s['attack_cooldown'] <= 0:
+                    s['facing'] = 1 if target.x > s['x'] else -1
+                    s['vx'] = s['facing'] * 32
+                    s['attack_cooldown'] = 120
+                elif s['attack_cooldown'] <= 0:
+                    dx = (target.x + target.width/2) - s['x']
+                    dy = (target.y + target.height/2) - s['y']
+                    d = max(1, math.hypot(dx, dy))
+                    self.bullets.append([s['x'] + 20, s['y'] + 20, (dx / d) * 18, (dy / d) * 18, 80, int((2 + getattr(player, 'bonus_damage', 0)) * getattr(player, 'damage_multiplier', 1.0))])
+                    s['attack_cooldown'] = 90
+            elif abs(s['vx']) < 2:
+                s['vx'] = 2 * s['facing']
+
+            s['x'] += s['vx']
+            s['vx'] *= 0.92
+            if s['x'] < 0:
+                s['x'] = 0
+                s['vx'] *= -0.5
+                s['facing'] = 1
+            elif s['x'] > width - 40:
+                s['x'] = width - 40
+                s['vx'] *= -0.5
+                s['facing'] = -1
+
+            s['attack_cooldown'] = max(0, s['attack_cooldown'] - 1)
+            if enemies:
+                for e in enemies:
+                    if e.hp > 0 and e.x < s['x'] + 40 and s['x'] < e.x + e.width and e.y < s['y'] + 40 and s['y'] < e.y + e.height:
+                        if e.take_damage(int((2 + getattr(player, 'bonus_damage', 0)) * getattr(player, 'damage_multiplier', 1.0)), s['facing'], knockback_x=4):
+                            s['attack_cooldown'] = 30
+            new_summons.append(s)
+
+        self.summons = new_summons
+        new_bullets = []
+        for b in self.bullets:
+            b[0] += b[2]
+            b[1] += b[3]
+            b[3] += 0
+            b[4] -= 1
+            if b[4] <= 0:
+                continue
+            hit = False
+            if enemies:
+                for e in enemies:
+                    if e.hp > 0 and e.x < b[0] < e.x + e.width and e.y < b[1] < e.y + e.height:
+                        if e.take_damage(b[5], 1 if b[2] > 0 else -1):
+                            hit = True
+                            break
+            if not hit:
+                new_bullets.append(b)
+        self.bullets = new_bullets
+    def draw_effect(self, screen):
+        for s in self.summons:
+            pygame.draw.ellipse(screen, (180, 255, 220), (int(s['x']), int(s['y']), 40, 40))
+            bar_width = int(40 * s['hp'] / max(1, s['max_hp']))
+            pygame.draw.rect(screen, (0, 255, 0), (int(s['x']), int(s['y']) - 6, bar_width, 4))
+        for b in self.bullets:
+            pygame.draw.circle(screen, (200, 255, 255), (int(b[0]), int(b[1])), 5)
+
+class FairyPoisonSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 600, (150, 220, 100), (100, 180, 80))
+        self.darts = []
+        self.player_ref = None
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            self.player_ref = player
+            alive = [e for e in enemies if e.hp > 0] if enemies else []
+            self.darts = []
+            for i in range(8):
+                target = None
+                if alive:
+                    target = alive[i] if i < len(alive) else random.choice(alive)
+                self.darts.append([player.x + 20, player.y + 20, 18 * player.facing, 0, target, 120])
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        new_darts = []
+        for d in self.darts:
+            if d[4] and d[4].hp <= 0:
+                alive = [e for e in enemies if e.hp > 0] if enemies else []
+                d[4] = random.choice(alive) if alive else None
+            if d[4]:
+                dx = (d[4].x + d[4].width/2) - d[0]
+                dy = (d[4].y + d[4].height/2) - d[1]
+                dist = max(1, math.hypot(dx, dy))
+                d[2] = (dx / dist) * 18
+                d[3] = (dy / dist) * 18
+            d[0] += d[2]
+            d[1] += d[3]
+            d[5] -= 1
+            if d[5] <= 0 or not (-100 < d[0] < width + 100 and -100 < d[1] < height + 100):
+                continue
+            hit = False
+            if enemies:
+                for e in enemies:
+                    if e.hp > 0 and e.x < d[0] < e.x + e.width and e.y < d[1] < e.y + e.height:
+                        e.take_damage(2, self.player_ref.facing, status_effect=True, element='poison')
+                        e.poison_timer = max(e.poison_timer, 180)
+                        hit = True
+                        break
+            if not hit:
+                new_darts.append(d)
+        self.darts = new_darts
+    def draw_effect(self, screen):
+        for d in self.darts:
+            pygame.draw.circle(screen, (120, 255, 120), (int(d[0]), int(d[1])), 5)
+
+class FairyGardenSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 720, (200, 180, 255), (150, 120, 255))
+        self.active_timer = 0
+        self.initial_duration = 300
+        self.heal_tick = 0
+        self.radius = 220
+        self.player_ref = None
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            self.active_timer = 300
+            self.player_ref = player
+            self.heal_tick = 0
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        if self.active_timer > 0:
+            self.active_timer -= 1
+            self.heal_tick += 1
+            if self.heal_tick >= 30:
+                self.heal_tick = 0
+                if self.player_ref:
+                    self.player_ref.hp = min(self.player_ref.max_hp, self.player_ref.hp + 1)
+                if player and hasattr(player, 'character') and type(player.character).__name__ == 'Fairy':
+                    summons = player.character.skill_summon.summons
+                    for s in summons:
+                        if s['hp'] > 0:
+                            s['hp'] = min(s['max_hp'], s['hp'] + 1)
+    def draw_effect(self, screen):
+        if self.active_timer > 0 and self.player_ref:
+            alpha = min(120, int(self.active_timer * 0.4))
+            surf = pygame.Surface((self.radius*2+10, self.radius*2+10), pygame.SRCALPHA)
+            pygame.draw.circle(surf, (170, 255, 200, alpha), (self.radius+5, self.radius+5), self.radius)
+            screen.blit(surf, (int(self.player_ref.x + 20 - self.radius - 5), int(self.player_ref.y + 20 - self.radius - 5)))
+
+class FairyWrathSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 900, (180, 255, 150), (100, 200, 100))
+        self.active_timer = 0
+        self.player_ref = None
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            self.active_timer = 30
+            self.player_ref = player
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        if self.active_timer > 0:
+            self.active_timer -= 1
+            if self.active_timer == 29 and enemies and self.player_ref:
+                blast = pygame.Rect(self.player_ref.x - 120, self.player_ref.y, 280, 100)
+                for e in enemies:
+                    if e.hp > 0 and blast.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+                        e.take_damage(int((8 + self.damage_bonus) * self.damage_multiplier), 1 if e.x > self.player_ref.x else -1, knockback_y=-10, element='heavy')
+    def draw_effect(self, screen):
+        if self.active_timer > 0 and self.player_ref:
+            alpha = min(160, int(self.active_timer * 5))
+            rect = pygame.Rect(self.player_ref.x - 120, self.player_ref.y, 280, 100)
+            surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+            pygame.draw.rect(surf, (180, 255, 180, alpha), (0, 0, rect.width, rect.height), border_radius=15)
+            screen.blit(surf, (rect.x, rect.y))
+
+class FairyCharmSkill(Skill):
+    def __init__(self, x, y):
+        super().__init__(x, y, 1200, (255, 200, 255), (200, 150, 255))
+        self.active_skills = []
+        self.effect_timer = 0
+        self.chosen_names = []
+    def _get_skill_classes(self):
+        return [cls for cls in globals().values() if isinstance(cls, type) and issubclass(cls, Skill) and cls not in (Skill, FairyCharmSkill)]
+    def activate(self, player, enemies=None):
+        if super().activate(player, enemies):
+            candidates = self._get_skill_classes()
+            if len(candidates) < 2:
+                return False
+            chosen = random.sample(candidates, min(2, len(candidates)))
+            self.active_skills = []
+            self.chosen_names = []
+            for cls in chosen:
+                skill = cls(0, 0)
+                skill.activate(player, enemies)
+                self.active_skills.append(skill)
+                self.chosen_names.append(skill.__class__.__name__)
+            self.effect_timer = 240
+            return True
+        return False
+    def update(self, enemies=None, cooldown_speed=1, player=None):
+        super().update(enemies, cooldown_speed)
+        if self.effect_timer > 0:
+            self.effect_timer -= 1
+            for sub in self.active_skills:
+                sub.update(enemies, cooldown_speed, player)
+        elif self.active_skills:
+            self.active_skills = []
+    def draw_effect(self, screen):
+        for sub in self.active_skills:
+            sub.draw_effect(screen)
+        if self.effect_timer > 0 and self.chosen_names and self.chosen_names[0]:
+            text = " + ".join(self.chosen_names)
+            if not hasattr(Character, '_font_sm') or Character._font_sm is None:
+                jp_fonts = ['msgothic', 'yugothic', 'meiryo', 'msuigothic', 'arial']
+                Character._font_sm = None
+                for f in jp_fonts:
+                    try:
+                        Character._font_sm = pygame.font.SysFont(f, 14)
+                        if Character._font_sm: break
+                    except:
+                        continue
+                if not Character._font_sm: Character._font_sm = pygame.font.SysFont(None, 14)
+            text_s = Character._font_sm.render(text, True, (255, 255, 255))
+            if hasattr(self, 'x'):
+                screen.blit(text_s, (self.x + 10, self.y + 60))
+
+class Fairy(Character):
+    """Fairy: Summoner with poison darts, healing gardens, and random charm magic."""
+    def __init__(self, player):
+        super().__init__(player)
+        self.skill_summon = FairySummonSkill(15, 15)
+        self.skill_poison = FairyPoisonSkill(75, 15)
+        self.skill_garden = FairyGardenSkill(135, 15)
+        self.skill_wrath = FairyWrathSkill(195, 15)
+        self.skill_charm = FairyCharmSkill(255, 15)
+        self.skills = [self.skill_summon, self.skill_poison, self.skill_garden, self.skill_wrath, self.skill_charm]
+        self.projectiles = []
+
+    def get_max_hp(self):
+        return 9
+    def get_speed(self):
+        return 1.2
+    def get_jump_power(self):
+        return -16
+
+    def attack(self, enemies):
+        speed = 20
+        count = 1 + getattr(self.player, 'multi_cast_level', 0)
+        for i in range(count):
+            y_offset = (i - (count - 1) / 2) * 8
+            self.projectiles.append([self.player.x + 20, self.player.y + 20 + y_offset, speed * self.player.facing, 0, 45])
+
+    def handle_event(self, event, enemies):
+        super().handle_event(event, enemies)
+        if event.type == pygame.KEYDOWN:
+            if (event.key == key_config['jump']) and (self.player.y >= ground or self.player.jumpcount > 0):
+                self.player.vy = self.player.jump_power
+                self.player.jumpcount -= 1
+            if not self.is_reincarnator_mode:
+                if event.key == key_config['skill_1']: self.skill_summon.activate(self.player, enemies)
+                if event.key == key_config['skill_2']: self.skill_poison.activate(self.player, enemies)
+                if event.key == key_config['skill_3']: self.skill_garden.activate(self.player, enemies)
+                if event.key == key_config['skill_4']: self.skill_wrath.activate(self.player, enemies)
+                if event.key == key_config['skill_5']: self.skill_charm.activate(self.player, enemies)
+
+    def update(self, keys, enemies, cooldown_speed):
+        super().update(keys, enemies, cooldown_speed)
+        new_projectiles = []
+        for p in self.projectiles:
+            p[0] += p[2]
+            p[1] += p[3]
+            p[4] -= 1
+            if p[4] <= 0:
+                continue
+            hit = False
+            if enemies:
+                for e in enemies:
+                    if e.hp > 0 and e.x < p[0] < e.x + e.width and e.y < p[1] < e.y + e.height:
+                        if e.take_damage(int((1 + getattr(self.player, 'bonus_damage', 0)) * getattr(self.player, 'damage_multiplier', 1.0)), self.player.facing, element='light'):
+                            hit = True
+                            break
+            if not hit:
+                new_projectiles.append(p)
+        self.projectiles = new_projectiles
+
+    def draw_effects(self, screen):
+        super().draw_effects(screen)
+        for p in self.projectiles:
+            points = [
+                (int(p[0] + 10), int(p[1])),
+                (int(p[0]), int(p[1] + 6)),
+                (int(p[0] - 10), int(p[1])),
+                (int(p[0]), int(p[1] - 6))
+            ]
+            pygame.draw.polygon(screen, (255, 150, 220), points)
+            pygame.draw.polygon(screen, (255, 255, 255), points, 2)
 
 class Swordsman(Character):
     """Swordsman: Standard character. Good balance of melee and mobility skills."""
@@ -4217,6 +4551,7 @@ class Enemy:
         self._frozen_timer = 0
         self._burn_timer = 0
         self._darkness_timer = 0
+        self._poison_timer = 0
         self.spawn_timer = 0
         self.debris_particles = []
         self.scored = False
@@ -4253,6 +4588,17 @@ class Enemy:
             self._darkness_timer = 0
         else:
             self._darkness_timer = value
+
+    @property
+    def poison_timer(self):
+        return getattr(self, '_poison_timer', 0)
+
+    @poison_timer.setter
+    def poison_timer(self, value):
+        if getattr(self, 'spawn_timer', 0) > 0:
+            self._poison_timer = 0
+        else:
+            self._poison_timer = value
 
     def update(self, player):
         if self.spawn_timer > 0:
@@ -4292,8 +4638,12 @@ class Enemy:
             if self.darkness_timer % 30 == 0:
                 self.take_damage(1, status_effect=True, element='dark')
             if self.burn_timer % 60 == 0: # Damage every second
-
                 self.take_damage(1, status_effect=True)
+
+        if getattr(self, 'poison_timer', 0) > 0:
+            self.poison_timer -= 1
+            if self.poison_timer % 30 == 0:
+                self.take_damage(1, status_effect=True, element='poison')
 
         if self.attack_cooldown > 0: self.attack_cooldown -= 1
         
@@ -5656,7 +6006,7 @@ async def main():
                             elif i == 2: player.set_character(MagicSwordsman)
                             elif i == 3: player.set_character(Warrior)
                             elif i == 4: player.set_character(Pyromancer)
-                            elif i == 5: player.set_character(Lancer)
+                            elif i == 5: player.set_character(Fairy)
                             elif i == 6: player.set_character(MonsterBeta)
                             elif i == 7: player.set_character(IceMage)
                         
@@ -6206,7 +6556,7 @@ async def main():
                 {"name": "MagicSwordsman", "color": (80, 20, 150), "skills": "J:MagicSword K:Thunder\nL:IceEnchant N:FireEnchant\nM:BraveCharge"},
                 {"name": "Warrior", "color": (150, 100, 20), "skills": "J:HammerThrow K:SuperArmor\nL:Energy N:Earthquake\nM:WarCry"},
                 {"name": "Pyromancer", "color": (200, 50, 0), "skills": "J:Lava K:SpreadFire\nL:Eruption N:FlameDash\nM:Meteor"},
-                {"name": "Lancer", "color": (50, 150, 150), "skills": "J:Javelin K:VaultStrike\nL:RapidThrust N:Sweep\nM:DragonDive"},
+                {"name": "Fairy", "color": (200, 180, 255), "skills": "J:Summon K:Poison\nL:Garden N:Wrath\nM:Charm"},
                 {"name": "Dragon Knight", "color": (180, 40, 40), "skills": "J:Dragon Strike K:Sanctuary\nL:Light Arrow N:Dragon Meteor\nM:Gekirin"},
                 {"name": "IceMage", "color": (100, 200, 255), "skills": "J:AlHuma K:IceBrand\nL:Lance N:Shield\nM:Cocytus"}
             ]
