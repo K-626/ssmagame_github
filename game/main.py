@@ -1066,33 +1066,29 @@ class Character:
     def generate_boss_rewards(self):
         """Generates special rewards after boss defeat"""
         global wave_number
-        is_sword = any(type(self).__name__ == cls for cls in ["MagicSwordsman", "Warrior", "MonsterBeta"]) or \
+        weapon_type = getattr(self.player.character, 'weapon_type', None)
+        is_sword = weapon_type == 'sword' or any(type(self).__name__ == cls for cls in ["MagicSwordsman", "Warrior", "MonsterBeta"]) or \
                    any(type(s).__name__ == "IceBrandArtsSkill" for s in self.skills)
-        is_spear = type(self).__name__ == "Lancer"
-        is_hammer = type(self).__name__ == "Warrior"
+        is_spear = weapon_type == 'spear' or type(self).__name__ == "Lancer"
+        is_hammer = weapon_type == 'hammer' or type(self).__name__ == "Warrior"
         is_projectile = any(type(self).__name__ == cls for cls in ["Pyromancer", "IceMage", "DarkMage", "Hunter", "MonsterBeta"])
 
         pool = [
             {"type": "slot_plus", "name": "Choice Slot+", "desc": "Normal upgrade choices +1", "color": (100, 200, 255)},
-            {"type": "limit_break", "name": "Limit Break", "desc": "One skill Damage x1.5", "color": (255, 100, 100)},
             {"type": "hero_blessing", "name": "Hero's Blessing", "desc": "Max HP+10, Heal, Def+1", "color": (255, 215, 0)},
             {"type": "soulburst", "name": "Soulburst", "desc": "Explode when taking damage (Stackable damage)", "color": (255, 150, 50)},
             {"type": "score_fever", "name": "Score Fever", "desc": "Enemy HP/ATK +25%, Score x+0.5 (Stackable)", "color": (255, 200, 0)},
             {"type": "berserker_gamble", "name": "Berserker's Gamble", "desc": "Damage taken +25%, Score x+0.5 (Stackable)", "color": (200, 50, 50)},
             {"type": "vampiric_touch", "name": "Vampiric Touch", "desc": "15% chance to heal 1% MaxHP on kill (Stackable %)", "color": (150, 0, 0)},
-            {"type": "glass_cannon", "name": "Glass Cannon", "desc": "Halve MaxHP, deal 1.5x damage (Stackable dmg)", "color": (255, 50, 255)},
+            {"type": "glass_cannon", "name": "Glass Cannon", "desc": "Halve MaxHP, deal 1.5x damage (Stackable 1.5^n)", "color": (255, 50, 255)},
             {"type": "phantom_step", "name": "Phantom Step", "desc": "10% chance to dodge damage (Max 80%)", "color": (200, 200, 255)},
-            {"type": "executioner", "name": "Executioner", "desc": "2x damage to enemies below 30% HP", "color": (100, 0, 100)},
-            {"type": "titans_grip", "name": "Titan's Grip", "desc": "Double knockback distance", "color": (150, 150, 150)}
+            {"type": "executioner", "name": "Executioner", "desc": "2x damage to enemies below 30% HP", "color": (100, 0, 100)}
         ]
 
-        if is_sword:
-            pool.append({"type": "soul_sword", "name": "Soul Sword", "desc": "Heal 20% of damage dealt with sword hits (Stackable %)", "color": (150, 255, 150)})
-            pool.append({"type": "blood_sword", "name": "Blood Sword", "desc": "1.1x damage if hit again within 1s (Stackable duration)", "color": (255, 50, 50)})
-        if is_spear:
-            pool.append({"type": "poison_spear", "name": "Poison Spear", "desc": "Deal 10% current HP on spear hits (Stackable %)", "color": (100, 255, 100)})
-        if is_hammer:
-            pool.append({"type": "thunder_mace", "name": "Thunder Mace", "desc": "10% chance for lightning on hammer hits (Stackable %/#)", "color": (255, 255, 100)})
+        pool.append({"type": "soul_sword", "name": "Soul Sword", "desc": "Heal 20% of damage dealt with weapon hits (Stackable %)", "color": (150, 255, 150)})
+        pool.append({"type": "blood_sword", "name": "Blood Sword", "desc": "1.1x damage if hit again within 1s (Stackable duration)", "color": (255, 50, 50)})
+        pool.append({"type": "poison_spear", "name": "Poison Spear", "desc": "Deal 10% current HP on weapon hits (Stackable %)", "color": (100, 255, 100)})
+        pool.append({"type": "thunder_mace", "name": "Thunder Mace", "desc": "10% chance for lightning on weapon hits (Stackable %/#)", "color": (255, 255, 100)})
         if is_projectile:
             pool.append({"type": "multi_cast", "name": "Multi-Cast", "desc": "Magic/Axe projectile count +1 (Stackable #)", "color": (150, 100, 255)})
 
