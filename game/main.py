@@ -1029,6 +1029,22 @@ class Character:
 
         my_skill_types = [type(s) for s in self.skills]
         unacquired = [s for s in all_skills_classes if s not in my_skill_types]
+        
+        # In reincarnator mode, if one of Survivor/Super Armor/Sanctuary is held, exclude the others
+        if self.is_reincarnator_mode:
+            has_survivor = SurvivalSkill in my_skill_types
+            has_super_armor = SuperArmorSkill in my_skill_types
+            has_sanctuary = SanctuarySkill in my_skill_types
+            
+            if has_survivor or has_super_armor or has_sanctuary:
+                # If any one of these three is held, remove the other two from unacquired
+                if has_survivor:
+                    unacquired = [s for s in unacquired if s not in [SuperArmorSkill, SanctuarySkill]]
+                elif has_super_armor:
+                    unacquired = [s for s in unacquired if s not in [SurvivalSkill, SanctuarySkill]]
+                elif has_sanctuary:
+                    unacquired = [s for s in unacquired if s not in [SurvivalSkill, SuperArmorSkill]]
+        
         random.shuffle(unacquired)
         
         # [Translated/Cleaned Comment]
@@ -1078,7 +1094,7 @@ class Character:
         pool.append({"type": "rebirth_flame", "name": "Rebirth Flame", "desc": "Gain 1 Rebirth Point (revive at full HP with fire explosion)", "color": (255, 69, 0)})
         pool.append({"type": "chain_lightning", "name": "Chain Lightning", "desc": "On kill, lightning chains to 4 nearby enemies (15%*lv MaxHP)", "color": (255, 255, 50)})
 
-        num_choices = 4 if wave_number > 50 else 3
+        num_choices = 5 if wave_number > 100 else (4 if wave_number > 50 else 3)
         self.current_boss_rewards = random.sample(pool, min(num_choices, len(pool)))
 
     def apply_boss_reward(self, reward):
@@ -1390,12 +1406,9 @@ class Warrior(Character):
                     hammer_rect = pygame.Rect(hx - 50, hy - 50, 100, 100)
                     for e in enemies:
                         if e.hp > 0 and e not in self.hit_enemies and hammer_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            # Normal damage with Blood Sword multiplier
+                            # Normal damage (Blood Sword multiplier applied in take_damage)
                             base_dmg = 4 * getattr(self.player, 'damage_multiplier', 1.0)
-                            blood_mult = 1.0
-                            if getattr(self.player, 'blood_sword_level', 0) > 0 and getattr(self.player, 'blood_sword_hits', 0) > 0:
-                                blood_mult = 1.1 ** self.player.blood_sword_hits
-                            damage = int(base_dmg * blood_mult)
+                            damage = int(base_dmg)
                             if e.take_damage(damage, self.player.facing, knockback_x=12, knockback_y=-8, element='heavy', is_blood_sword_applicable=True): # High damage, large knockback
                                 self.player.on_weapon_hit(e, damage, self.player.facing)
                                 self.hit_enemies.append(e)
@@ -1762,12 +1775,9 @@ class Lancer(Character):
                     spear_rect = pygame.Rect(hx, hy - 15, 210, 30) 
                     for e in enemies:
                         if e.hp > 0 and e not in self.hit_enemies and spear_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            # Normal damage with Blood Sword multiplier
+                            # Normal damage (Blood Sword multiplier applied in take_damage)
                             base_dmg = 2 * getattr(self.player, 'damage_multiplier', 1.0)
-                            blood_mult = 1.0
-                            if getattr(self.player, 'blood_sword_level', 0) > 0 and getattr(self.player, 'blood_sword_hits', 0) > 0:
-                                blood_mult = 1.1 ** self.player.blood_sword_hits
-                            damage = int(base_dmg * blood_mult)
+                            damage = int(base_dmg)
                             if e.take_damage(damage, self.player.facing, knockback_x=5, is_blood_sword_applicable=True):
                                 self.player.on_weapon_hit(e, damage, self.player.facing)
                                 self.hit_enemies.append(e)
@@ -2442,6 +2452,7 @@ class SanctuarySkill(Skill):
         self.sanctuary_x = 0
         self.sanctuary_y = 0
         self.active_timer = 0
+        self.initial_duration = 300
         self.sanctuary_radius = 160
         self.player_ref = None
     def activate(self, player, enemies=None):
@@ -3506,10 +3517,7 @@ class Hunter(Character):
                 for e in enemies:
                     if e.hp > 0 and e not in a[5] and axe_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
                         base_dmg = 2 + self.player.bonus_damage
-                        blood_mult = 1.0
-                        if getattr(self.player, 'blood_sword_level', 0) > 0 and getattr(self.player, 'blood_sword_hits', 0) > 0:
-                            blood_mult = 1.1 ** self.player.blood_sword_hits
-                        damage = int(base_dmg * blood_mult)
+                        damage = int(base_dmg)  # Blood Sword multiplier applied in take_damage
                         if e.take_damage(damage, 1 if a[2] > 0 else -1, ignore_iframes=True, is_blood_sword_applicable=True):
                             self.player.on_weapon_hit(e, damage, 1 if a[2] > 0 else -1)
                             a[5].append(e)
@@ -3831,12 +3839,8 @@ class Player:
             is_critical = abs(self.vx) > 10
             base_dmg = (2 if is_critical else 1) + self.bonus_damage
             
-            # Blood Sword multiplier
-            blood_mult = 1.0
-            if self.blood_sword_level > 0 and self.blood_sword_hits > 0:
-                blood_mult = 1.1 ** self.blood_sword_hits
-            
-            damage = int(base_dmg * blood_mult)
+            # Blood Sword multiplier applied in Enemy.take_damage
+            damage = int(base_dmg)
             p_center_x = self.x + 20 * self.facing + 20
             p_center_y = self.y + 20
             swing_progress = (12 - self.swording) / 12.0
@@ -4749,6 +4753,12 @@ class HealerEnemy(Enemy):
                 pygame.draw.circle(surf, (100, 255, 100, alpha), (radius + 1, radius + 1), radius, 3)
                 screen.blit(surf, (cx - radius - 1, cy - radius - 1))
 
+    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3,
+        status_effect=False, element=None, ignore_iframes=False, is_blood_sword_applicable=False):
+        return super().take_damage(damage, source_facing, knockback_x, knockback_y,
+                                   status_effect, element, ignore_iframes,
+                                   is_blood_sword_applicable)
+
 class BomberEnemy(Enemy):
     """Bomber: Explodes and deals area damage when defeated"""
     def __init__(self, x, y, hp=2, attack_damage=1):
@@ -4838,6 +4848,12 @@ class BomberEnemy(Enemy):
             cy = int(self.y + 5)
             pygame.draw.polygon(screen, (255, 255, 0), [(cx, cy - 5), (cx - 4, cy + 5), (cx + 4, cy + 5)])
 
+    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3,
+        status_effect=False, element=None, ignore_iframes=False, is_blood_sword_applicable=False):
+        return super().take_damage(damage, source_facing, knockback_x, knockback_y,
+                                   status_effect, element, ignore_iframes,
+                                   is_blood_sword_applicable)
+
 class SniperEnemy(Enemy):
     """Sniper: High-damage bullets with a warning line from long distance"""
 
@@ -4925,6 +4941,12 @@ class SniperEnemy(Enemy):
         cx = int(self.x + self.width // 2)
         cy = int(self.y + self.height // 2)
         pygame.draw.circle(screen, (255, 255, 100), (cx, cy), 4)
+
+    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3,
+        status_effect=False, element=None, ignore_iframes=False, is_blood_sword_applicable=False):
+        return super().take_damage(damage, source_facing, knockback_x, knockback_y,
+                                   status_effect, element, ignore_iframes,
+                                   is_blood_sword_applicable)
 
 class FlameDashEnemy(Enemy):
     def __init__(self, x, y, hp=4, attack_damage=1):
@@ -5131,6 +5153,12 @@ class BlockGolemBoss(Enemy):
             r = int((30 - self.shockwave_timer) * 10)
             pygame.draw.ellipse(screen, (255, 255, 200), (self.x + 50 - r, ground - 20, r * 2, 40), 2)
 
+    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3,
+        status_effect=False, element=None, ignore_iframes=False, is_blood_sword_applicable=False):
+        return super().take_damage(damage, source_facing, knockback_x, knockback_y,
+                                   status_effect, element, ignore_iframes,
+                                   is_blood_sword_applicable)
+
 class ShadowWeaverBoss(Enemy):
     def __init__(self, x, y, hp=80, attack_damage=2):
         super().__init__(x, y, hp, (128, 0, 128), 'boss', attack_damage)
@@ -5181,6 +5209,12 @@ class ShadowWeaverBoss(Enemy):
         pygame.draw.rect(screen, (50, 50, 50), (width // 2 - bar_w // 2, 20, bar_w, bar_h))
         pygame.draw.rect(screen, (255, 0, 128), (width // 2 - bar_w // 2, 20, int(bar_w * (self.hp / self.max_hp)), bar_h))
 
+    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3,
+        status_effect=False, element=None, ignore_iframes=False, is_blood_sword_applicable=False):
+        return super().take_damage(damage, source_facing, knockback_x, knockback_y,
+                                   status_effect, element, ignore_iframes,
+                                   is_blood_sword_applicable)
+
 class SteelSentinelBoss(Enemy):
     def __init__(self, x, y, hp=150, attack_damage=3):
         super().__init__(x, y, hp, (192, 192, 192), 'boss', attack_damage)
@@ -5221,6 +5255,12 @@ class SteelSentinelBoss(Enemy):
         bar_h = 20
         pygame.draw.rect(screen, (50, 50, 50), (width // 2 - bar_w // 2, 20, bar_w, bar_h))
         pygame.draw.rect(screen, (150, 150, 150), (width // 2 - bar_w // 2, 20, int(bar_w * (self.hp / self.max_hp)), bar_h))
+
+    def take_damage(self, damage, source_facing=1, knockback_x=5, knockback_y=-3,
+        status_effect=False, element=None, ignore_iframes=False, is_blood_sword_applicable=False):
+        return super().take_damage(damage, source_facing, knockback_x, knockback_y,
+                                   status_effect, element, ignore_iframes,
+                                   is_blood_sword_applicable)
 
 class FrostWyrmBoss(Enemy):
     def __init__(self, x, y, hp=100, attack_damage=2):
