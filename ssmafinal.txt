@@ -1848,8 +1848,7 @@ class FairySummonSkill(Skill):
                     dx = (target.x + target.width/2) - s['x']
                     dy = (target.y + target.height/2) - s['y']
                     d = max(1, math.hypot(dx, dy))
-                    # Spawn a slightly-homing bullet aimed at the target
-                    self.bullets.append([s['x'] + 20, s['y'] + 20, (dx / d) * 18, (dy / d) * 18, 120, int((2 + getattr(player, 'bonus_damage', 0)) * getattr(player, 'damage_multiplier', 1.0))])
+                    self.bullets.append([s['x'] + 20, s['y'] + 20, (dx / d) * 18, (dy / d) * 18, 80, int((2 + getattr(player, 'bonus_damage', 0)) * getattr(player, 'damage_multiplier', 1.0))])
                     s['attack_cooldown'] = 90
             elif abs(s['vx']) < 2:
                 s['vx'] = 2 * s['facing']
@@ -1876,31 +1875,16 @@ class FairySummonSkill(Skill):
         self.summons = new_summons
         new_bullets = []
         for b in self.bullets:
-            # Light homing: adjust velocity slightly toward nearest living enemy
-            if enemies:
-                alive = [e for e in enemies if e.hp > 0]
-                if alive:
-                    # find nearest enemy to bullet
-                    targ = min(alive, key=lambda e: math.hypot((e.x + e.width/2) - b[0], (e.y + e.height/2) - b[1]))
-                    dx = (targ.x + targ.width/2) - b[0]
-                    dy = (targ.y + targ.height/2) - b[1]
-                    dist = max(1, math.hypot(dx, dy))
-                    # smooth steering so bullets can catch moving/flying targets like PinkEnemy
-                    desired_vx = (dx / dist) * 18
-                    desired_vy = (dy / dist) * 18
-                    b[2] = (b[2] * 5 + desired_vx) / 6
-                    b[3] = (b[3] * 5 + desired_vy) / 6
-
             b[0] += b[2]
             b[1] += b[3]
+            b[3] += 0
             b[4] -= 1
             if b[4] <= 0:
                 continue
             hit = False
             if enemies:
                 for e in enemies:
-                    # widen collision slightly to account for fast-moving or floating enemies
-                    if e.hp > 0 and (e.x - 6) < b[0] < (e.x + e.width + 6) and (e.y - 6) < b[1] < (e.y + e.height + 6):
+                    if e.hp > 0 and e.x < b[0] < e.x + e.width and e.y < b[1] < e.y + e.height:
                         if e.take_damage(b[5], 1 if b[2] > 0 else -1):
                             hit = True
                             break
@@ -1925,15 +1909,11 @@ class FairyPoisonSkill(Skill):
             self.player_ref = player
             alive = [e for e in enemies if e.hp > 0] if enemies else []
             self.darts = []
-            # increase dart count and allow them to home
-            count = 14
-            for i in range(count):
+            for i in range(8):
                 target = None
                 if alive:
-                    target = alive[i % len(alive)] if len(alive) > 0 else None
-                vx = 18 * player.facing
-                vy = 0
-                self.darts.append([player.x + 20, player.y + 20, vx, vy, target, 160, 2])
+                    target = alive[i] if i < len(alive) else random.choice(alive)
+                self.darts.append([player.x + 20, player.y + 20, 18 * player.facing, 0, target, 120])
             return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
@@ -1944,16 +1924,11 @@ class FairyPoisonSkill(Skill):
                 alive = [e for e in enemies if e.hp > 0] if enemies else []
                 d[4] = random.choice(alive) if alive else None
             if d[4]:
-                # Homing steering toward target (smooth)
                 dx = (d[4].x + d[4].width/2) - d[0]
                 dy = (d[4].y + d[4].height/2) - d[1]
                 dist = max(1, math.hypot(dx, dy))
-                desired_vx = (dx / dist) * 20
-                desired_vy = (dy / dist) * 20
-                # steering strength controlled by d[6]
-                steer = d[6] if len(d) > 6 else 2
-                d[2] = (d[2] * (steer + 3) + desired_vx) / (steer + 4)
-                d[3] = (d[3] * (steer + 3) + desired_vy) / (steer + 4)
+                d[2] = (dx / dist) * 18
+                d[3] = (dy / dist) * 18
             d[0] += d[2]
             d[1] += d[3]
             d[5] -= 1
@@ -2015,57 +1990,28 @@ class FairyWrathSkill(Skill):
         super().__init__(x, y, 900, (180, 255, 150), (100, 200, 100))
         self.active_timer = 0
         self.player_ref = None
-        self.spikes = []
     def activate(self, player, enemies=None):
         if super().activate(player, enemies):
-            # instant spike burst: spawn ~5 brown spikes from ground around player
             self.active_timer = 30
             self.player_ref = player
-            self.spikes = []
-            base_x = int(player.x + 20)
-            # spawn 5 spikes spread in front of player-facing side
-            for i in range(5):
-                offset = (i - 2) * 20 + player.facing * 40
-                sx = base_x + offset
-                self.spikes.append({'x': sx, 'timer': 18, 'height': 60, 'damage_done': False})
             return True
         return False
     def update(self, enemies=None, cooldown_speed=1, player=None):
         super().update(enemies, cooldown_speed)
         if self.active_timer > 0:
             self.active_timer -= 1
-
-        # Update spikes: brief existence, apply damage once when created or while persisting
-        if enemies and self.spikes:
-            new_spikes = []
-            for s in self.spikes:
-                # create spike rect (from ground upward)
-                h = s.get('height', 60)
-                w = 18
-                rx = int(s['x'] - w//2)
-                ry = int(ground - h)
-                spike_rect = pygame.Rect(rx, ry, w, h)
-                if not s.get('damage_done', False):
-                    for e in enemies:
-                        if e.hp > 0 and spike_rect.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
-                            dmg = int((8 + self.damage_bonus) * self.damage_multiplier)
-                            e.take_damage(dmg, 1 if (e.x + e.width/2) > s['x'] else -1, knockback_y=-8, element='heavy')
-                            # only deal once per spike to avoid overkill
-                    s['damage_done'] = True
-                s['timer'] -= 1
-                if s['timer'] > 0:
-                    new_spikes.append(s)
-            self.spikes = new_spikes
+            if self.active_timer == 29 and enemies and self.player_ref:
+                blast = pygame.Rect(self.player_ref.x - 120, self.player_ref.y, 280, 100)
+                for e in enemies:
+                    if e.hp > 0 and blast.colliderect(pygame.Rect(e.x, e.y, e.width, e.height)):
+                        e.take_damage(int((8 + self.damage_bonus) * self.damage_multiplier), 1 if e.x > self.player_ref.x else -1, knockback_y=-10, element='heavy')
     def draw_effect(self, screen):
-        # Draw spikes
-        for s in getattr(self, 'spikes', []):
-            h = s.get('height', 60)
-            w = 18
-            rx = int(s['x'] - w//2)
-            ry = int(ground - h)
-            # brown spike (triangle)
-            points = [(rx + w//2, ry), (rx, ry + h), (rx + w, ry + h)]
-            pygame.draw.polygon(screen, (120, 60, 20), points)
+        if self.active_timer > 0 and self.player_ref:
+            alpha = min(160, int(self.active_timer * 5))
+            rect = pygame.Rect(self.player_ref.x - 120, self.player_ref.y, 280, 100)
+            surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+            pygame.draw.rect(surf, (180, 255, 180, alpha), (0, 0, rect.width, rect.height), border_radius=15)
+            screen.blit(surf, (rect.x, rect.y))
 
 class FairyCharmSkill(Skill):
     def __init__(self, x, y):
